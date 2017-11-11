@@ -49,115 +49,6 @@
             return selectTab(tabEle);
         }
 
-//         function getHistory() {
-//           var deviceSelector = document.getElementById("deviceHistorySelector");
-//           var deviceDays = document.getElementById("deviceHistoryDays");
-//           if ((deviceDays.value >= 1) && (deviceDays.value <= 14)) {
-//               var queryArgs = "device=" + deviceSelector.value + "&numDays=" + deviceDays.value;
-//         
-//               //document.getElementById("deviceEvents").innerHTML = 'Requesting data...';
-//               document.getElementById("deviceEvents").style="color:darkgray";
-//               var xhttp = new XMLHttpRequest();
-//               xhttp.onreadystatechange = function() {
-//                 if (xhttp.readyState == 4) {
-//                   var deviceEventsEle = document.getElementById("deviceEvents");
-//                   if (xhttp.status == 200) {
-//                     document.getElementById("deviceEvents").style="color:black";
-//                     var historyObj = JSON.parse(xhttp.responseText);
-//                     if (historyObj.length > 0) {
-//                        var historyTableHTML = '<table class="w3-table w3-striped w3-bordered w3-card-4 w3-large">';
-//                        var rowIndex;
-//                        for (rowIndex in historyObj) {
-//                           var rowData = historyObj[rowIndex];
-//                           var rowHTML =
-//                             '<tr>' +
-//                             '<td>' + rowData.devname + '</td>' +
-//                             '<td>' + rowData.eventname + '</td>' +
-//                             '<td>' + formatDateTime(rowData.timestamp) + '</td>' +
-//                             '</tr>';
-//                           historyTableHTML += rowHTML;
-//                        }
-//                        historyTableHTML += '</table>';
-//                        deviceEventsEle.innerHTML = historyTableHTML;
-//                     } else {
-//                         deviceEventsEle.innerHTML =
-//                            'No ' + deviceSelector.value + ' events during last ' +
-//                            deviceDays.value + ' day(s)';
-//                     }
-//                   } else {
-//                       deviceEventsEle.innerHTML = 'Reading data...';
-//                   }
-//                 }
-//               }
-//               xhttp.open("POST", "/history", true);
-//               xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-//               xhttp.send(queryArgs);
-//            } else {
-//               alert("please enter number of days between 1 and 14");
-//            }
-//         }
-
-        function showHistory (devname) {
-            var deviceSelector = document.getElementById("deviceHistorySelector");
-            deviceSelector.value = devname;
-//            getHistory();
-            return selectTabById('tab2');
-        }
-        
-//        function getStatus() {
-//              //document.getElementById("deviceEvents").innerHTML = 'Requesting data...';
-//              document.getElementById("deviceEvents").style="color:darkgray";
-//              var xhttp = new XMLHttpRequest();
-//              xhttp.onreadystatechange = function() {
-//                if (xhttp.readyState == 4) {
-//                  if (xhttp.status == 200) {
-//                    var statusData = JSON.parse(xhttp.responseText);
-//                    var statusHTML = '<table class="w3-table w3-striped w3-bordered w3-card-4 w3-large">';
-//                    var deviceSelectorHTML = '';
-//                    var devIndex;
-//                    for (devIndex in statusData) {
-//                        var dev = statusData[devIndex];
-//                        var timestamp = '';
-//                        if (dev.hasOwnProperty('timestamp')) {
-//                            timestamp = formatDateTime(dev.timestamp);
-//                        }
-//                        var cmd = findCommandAndLabel(dev.name, dev.state);
-//                        var cmdCell = '';
-//                        if (cmd !== null) {
-//                            cmdCell = '<button style="height:50px; width:100px;" id="devButton_' + dev.name +
-//                                '" onclick="sendCommand(&quot;' + cmd.name + ' ' + cmd.command + '&quot;)">' +
-//                                cmd.label + '</button>';
-//                        }
-//                        var devRow =
-//                            '<tr>' +
-//                            '<td>' + dev.name + '</td>' +
-//                            '<td id="devState_' + dev.name + '">' + dev.state + '</td>' +
-//                            '<td>' +
-//                                '<a href="#" id="devTimestamp_' + dev.name + '"' +
-//                                    ' onclick="return showHistory(\'' + dev.name + '\');">' +
-//                                timestamp + '</a></td>' +
-//                            '<td>' + cmdCell + '</td>' +
-//                            '</tr>';
-//                        statusHTML += devRow;
-//
-//                        // device selector
-//                        deviceSelectorHTML += 
-//                            '<option value="' + dev.name + '">' + dev.name + '</option>';
-//                        }
-//                        statusHTML += '</table>';
-//                    deviceStatusNode.innerHTML = statusHTML;
-//
-//                    var deviceSelectorEle = document.getElementById("deviceHistorySelector");
-//                    deviceSelectorEle.innerHTML = deviceSelectorHTML;
-//                    getHistory();
-//                  } else {
-//                      deviceStatusNode.innerHTML = 'Reading data...';
-//                  }
-//                }
-//              }
-//            xhttp.open("GET", "/status", true);
-//            xhttp.send(null);
-//        }
 
     // from sitepoint.com "How to Capture CSS3 Animation Events in JavaScript" by Craig Buckler
     var pfx = ["webkit", "moz", "MS", "o", ""];
@@ -174,7 +65,7 @@
     </script>
 
     </head>
-<body onload="selectTabById('tab1'); getStatus();">
+<body onload="selectTabById('tab1')">
 
     <div class="w3-topnav w3-dark-grey w3-large" style="padding:0px 8px 2px 8px">
         <a href="#" id="tab1" name="tabLink" onclick="return selectTab(this);">Boiler</a>
@@ -186,10 +77,25 @@
         <div id="tab1Div" class="w3-container" style="display:none">
             <p>
                 Hi Carl - Over the next few weeks I'm going to be working on getting the oil tank gauge to display here,
-                so things may look strange at times...
+                so things may look strange or not work properly at times...
             </p>
-            <img id="boilerImage" src="images/NoImageData.png">
-                <br>
+            <table class="w3-table w3-bordered w3-card-4">
+                <tr>
+                    <td style="width:100">Oil Tank Gauge</td>
+                    <td style="width:160">Oil Tank Gauge Image goes here</td>
+                    <td style="width:100%">Oil Tank Level % goes here</td>
+                </tr>
+                <tr>
+                    <td style="width:100">Pressure Gauge</td>
+                    <td style="width:160"><img id="pressureGaugeImage" src="images/NoImageData.png"></td>
+                    <td style="width:100%">Boiler pressure PSI goes here</td>
+                </tr>
+                <tr>
+                    <td style="width:100">Control Panel</td>
+                    <td style="width:160"><img id="controlPanelImage" src="images/NoImageData.png"></td>
+                    <td style="width:100%">Boiler Status goes here</td>
+                </tr>
+            </table>
             <div style="display:inline-block">Last updated:</div>
             <div id="boilerDataTimestamp" style="display:inline-block">-</div>
         </div>

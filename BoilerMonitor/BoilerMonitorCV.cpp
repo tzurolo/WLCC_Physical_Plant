@@ -9,9 +9,6 @@ protocols:
         { ... }
 
     TODO:
-    1. change this over to use a socket to transmit data to node.js server (especially
-        image data). We can't use std::cout because node.js's execFile has a 200K data
-        limit on stdout.
 
 */
 //#define _POSIX_C_SOURCE 200809L
@@ -42,6 +39,15 @@ extern "C" {
 typedef std::map<std::string, cv::Scalar> ThresholdData;
 static ThresholdData thresholdData;
 static char b64code[500000];
+
+struct ROIDescriptor {
+    std::string name;
+    int topLeftX;   // percent
+    int topLeftY;   // percent
+    int width;
+    int height;
+};
+typedef std::vector<ROIDescriptor> ROIList;
 
 namespace {
 
@@ -74,6 +80,12 @@ void readColorThresholdData (
     } else {
         std::cerr << "Unable to open file " << thresholdsFilename << std::endl;
     }
+}
+
+void error(const char *msg)
+{
+    perror(msg);
+    exit(0);
 }
 
 void getCurrentTimeStrings (
@@ -123,14 +135,14 @@ void getCurrentTimeStrings (
 }
 
 void readCamImage (
+    const int sockfd,
+    const ROIList &ROIs,
     cv::VideoCapture &cap,
     int &tankLevel, // in units of percent
     std::string &serverJSON,
     std::string &serverImage)
 {
     tankLevel = 0;
-
-    // std::cerr << "read cam image" << std::endl;
 
     cv::Mat edges;
     cv::Mat tedges;
@@ -140,7 +152,7 @@ void readCamImage (
 
     // get image from camera
     cv::Mat frame;
-    for (int f = 0; f < 3; ++f) {   // this loop is a hack to flush out old frames from the buffer
+    for (int f = 0; f < 1; ++f) {   // this loop is a hack to flush out old frames from the buffer
                                     // TODO: use a thread to continuously grab
         cap >> frame; // get a new frame from camera
     }
@@ -150,120 +162,19 @@ void readCamImage (
     std::string forFilespec;
     std::string forServerDatabase;
     getCurrentTimeStrings(forImageAnnotation, forFilespec, forServerDatabase);
-#if 0
-    // analyze image to find and read gauge
-    // find float and base
-    cv::cvtColor(frame, ycrcb, CV_BGR2YCrCb);
-    cv::GaussianBlur(ycrcb, ycrcb, cv::Size(7,7), 1.5, 1.5);
-    cv::inRange(ycrcb, thresholdData["floatMin"], thresholdData["floatMax"], floatMask);
-
-    // get the contours of the float mask
-    std::vector<std::vector<cv::Point> > contours;
-    /// Find contours
-    cv::findContours(floatMask, contours,
-        cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE, cv::Point(0, 0) );
-    std::cerr << contours.size() << " float contours found." << std::endl;
-#if 0
-    // pick the contour with biggest bbox
-    double floatMaxBboxSize = 0;
-    cv::Rect floatBbox;
-    for (int c = 0; c < contours.size(); ++c) {
-      cv::Rect contourRec(boundingRect(contours[c]));
-      const double bboxSize = contourRec.area();
-      if (bboxSize > floatMaxBboxSize) {
-	floatBbox = contourRec;
-	floatMaxBboxSize = bboxSize;
-      }
-    }
-#else
-    // pick the contour with lowest top coord, but more
-    // than minimum size
-    const double minFloatContourArea = 12.0;
-    const int maxFloatBboxHeight = 15;
-    int minTop = 1000;
-    cv::Rect floatBbox;
-    for (int c = 0; c < contours.size(); ++c) {
-      cv::Rect contourRec(boundingRect(contours[c]));
-      int contourRecTop = contourRec.y;
-      if ((contourArea(contours[c]) > minFloatContourArea) &&
-          (contourRecTop < minTop)) {
-	floatBbox = contourRec;
-	minTop = contourRecTop;
-      }
-    }
-    if (floatBbox.height > maxFloatBboxHeight) {
-        floatBbox.height = maxFloatBboxHeight;
-    }
-#endif
-#if 0
-    // find bounding box around all the float contours
-    std::vector<cv::Point> bboxPts;
-    for (int c = 0; c < contours.size(); ++c) {
-      cv::Rect contourRec(boundingRect(contours[c]));
-      bboxPts.push_back(contourRec.tl());
-      bboxPts.push_back(contourRec.br());
-    }
-    cv::Rect floatBbox(boundingRect(bboxPts));
-#endif
-
-    // find the base
-    cv::inRange(ycrcb, thresholdData["baseMin"], thresholdData["baseMax"], baseMask);
-    cv::findContours(baseMask, contours,
-        cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE, cv::Point(0,0));
-    std::cerr << contours.size() << " base contours found." << std::endl;
-    // pick the contour with biggest bbox
-    double maxBboxSize = 0;
-    cv::Rect baseBbox;
-    for (int c = 0; c < contours.size(); ++c) {
-      cv::Rect contourRec(boundingRect(contours[c]));
-      const double bboxSize = contourRec.area();
-      if (bboxSize > maxBboxSize) {
-	baseBbox = contourRec;
-	maxBboxSize = bboxSize;
-      }
-    }
-
-    // find the scale
-    // find float and base
-    cv::Mat scaleMask;
-    cv::inRange(ycrcb, thresholdData["scaleMin"], thresholdData["scaleMax"], scaleMask);
-    // get the contours of the scale mask
-    /// Find contours
-    cv::findContours(scaleMask, contours,
-        cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE, cv::Point(0, 0) );
-    // pick the contour with lowest top coord, but more
-    // than minimum size
-    const double minScaleContourArea = 40.0;
-    minTop = 1000;
-    cv::Rect scaleBbox;
-    for (int c = 0; c < contours.size(); ++c) {
-      cv::Rect contourRec(boundingRect(contours[c]));
-      int contourRecTop = contourRec.y;
-      if ((contourArea(contours[c]) > minScaleContourArea) &&
-          (contourRecTop < minTop)) {
-	scaleBbox = contourRec;
-	minTop = contourRecTop;
-      }
-    }
-    cv::Rect caseBbox(floatBbox.x - 20, scaleBbox.y,
-        50, baseBbox.y - scaleBbox.y);
-
-    const int level = caseBbox.br().y - floatBbox.y;
-    tankLevel = (level * 100) / caseBbox.height;
-
-    // annotate and write image
-    cv::rectangle(frame, floatBbox, cv::Scalar(0, 255, 0), 2);
-    cv::rectangle(frame, caseBbox, cv::Scalar(255, 255, 255), 1);
-#endif
     char annotationBuf[80];
     sprintf(annotationBuf, "%s %d%%", forImageAnnotation.c_str(), tankLevel);
-#if 1
+#if 0
     cv::putText(frame, annotationBuf, cv::Point(5, frame.size().height - 10), 
         cv::FONT_HERSHEY_PLAIN, 1.0, cv::Scalar(255, 255, 0), 2);
 #endif
+    for (ROIList::const_iterator rIter = ROIs.begin(); rIter != ROIs.end(); ++rIter) {
+        const ROIDescriptor& roiDesc = *rIter;
 #if 1
-    cv::Rect roi(0, 0, 200, 200);
-#if 1
+     cv::Rect roi((frame.size().width * roiDesc.topLeftX) / 100,
+                  (frame.size().height * roiDesc.topLeftY) / 100,
+                  150, 150);
+#if 0
     // whole frame
     cv::Mat dst = frame;
 #else
@@ -284,7 +195,7 @@ void readCamImage (
     const int b64Len2 = base64_encode_blockend(&b64code[b64Len], &b64State);
     //std::cerr << "len1: " << b64Len << ", len2: " << b64Len2 << std::endl;
 
-    serverImage = std::string("<boilerImage:data:image/jpeg;base64,");
+    serverImage = std::string("<" + roiDesc.name + ":data:image/jpeg;base64,");
 #if 0
     serverImage += "iVBORw0KGgoAA"
         "AANSUhEUgAAABAAAAAQAQMAAAAlPW0iAAAABlBMVEUAAAD///+l2Z/dAAAAM0l"
@@ -313,12 +224,15 @@ void readCamImage (
 //        "\", \"imageFile\": \"" + imageFilespec +
         "\", \"timestamp\": \"" + forServerDatabase +
         "\"}";
-}
 
-void error(const char *msg)
-{
-    perror(msg);
-    exit(0);
+    // write image to server
+    const int n = write(sockfd,serverImage.c_str(), serverImage.size());
+    if (n < 0) {
+            error("ERROR writing to socket");
+    } else {
+        //std::cout << "wrote " << n << " of " << serverImage.size() << " bytes." << std::endl;
+    }
+    }   // ROI loop
 }
 
 }   // namespace
@@ -337,8 +251,13 @@ int main (const int argc, const char* argv[])
         std::cout << "failed to open camera" << std::endl;
         return -1;
     }
+#if 1
+    cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, 1920);
+#else
     cap.set(cv::CAP_PROP_FRAME_WIDTH, 320);
     cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+#endif
     cap.set(cv::CAP_PROP_BRIGHTNESS, 0.45);
 
     cap.set(cv::CAP_PROP_FPS, 15);
@@ -372,9 +291,16 @@ int main (const int argc, const char* argv[])
     else
         std::cout << "connected to host" << std::endl;
 
-    // read color threshold data
-    const char* thresholdsFilename = "HomeThresholds.txt"; 
-    readColorThresholdData(thresholdsFilename, thresholdData);
+    ROIList ROIs;
+    ROIDescriptor roi;
+    roi.name = "pressureGaugeImage";
+    roi.topLeftX = 65;
+    roi.topLeftY = 5;
+    ROIs.push_back(roi);
+    roi.name = "controlPanelImage";
+    roi.topLeftX = 27;
+    roi.topLeftY = 81;
+    ROIs.push_back(roi);
 
     char buffer[50000];
     std::string cinStr;
@@ -387,15 +313,9 @@ int main (const int argc, const char* argv[])
 #endif
             int tankLevel;
             std::string serverJSON;
-            std::string serverInage;
-            readCamImage(cap, tankLevel, serverJSON, serverInage);
-            // std::cout << serverJSON << std::endl;
+            std::string serverImage;
+            readCamImage(sockfd, ROIs, cap, tankLevel, serverJSON, serverImage);
 
-            n = write(sockfd,serverInage.c_str(), serverInage.size());
-            if (n < 0) 
-                 error("ERROR writing to socket");
-            else {
-                //std::cout << "wrote " << n << " of " << serverInage.size() << " bytes." << std::endl;
 #if CONTINUOUS_STREAM == 0
             }
 #endif
@@ -408,7 +328,6 @@ int main (const int argc, const char* argv[])
     printf("%s\n",buffer);
 #endif
 
-        }
     } while (cinStr != "exit");
     std::cout << "exiting" << std::endl;
 
