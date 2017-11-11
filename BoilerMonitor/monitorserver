@@ -1,0 +1,29 @@
+#!/bin/sh
+#/etc/init.d/monitorserver
+
+### BEGIN INIT INFO
+# Provides:             monitorserver
+# Required-Start:       
+# Required-Stop:        
+# Default-Start:        2 3 4 5
+# Default-Stop:         0 1 6
+# Short-Description:    Boiler monitor server start/stop
+# Description:          Boiler monitor server using forever & node.js start/stop
+### END INIT INFO
+
+export NODE_PATH=$NODE_PATH:/home/pi/BoilerMonitor/node_modules
+
+case "$1" in
+  start)
+  exec forever --sourceDir=/home/pi/BoilerMonitor -o /var/log/boilerserver.log -p /home/pi/forever BoilerMonitorServer.js
+  ;;
+stop)
+  exec forever stop --sourceDir=/home/pi/BoilerMonitor BoilerMonitorServer.js
+  ;;
+*)
+  echo "Usage: /etc/init.d/monitorserver {start|stop}"
+  exit 1
+  ;;
+esac
+
+exit 0

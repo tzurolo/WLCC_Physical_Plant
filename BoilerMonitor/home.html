@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>WLCC Physical Plant</title>
+    <link rel="stylesheet" href="css/w3.css">
+        <style>
+            .flashHighlight {
+                -webkit-animation-name: flashAnim; /* Chrome, Safari, Opera */
+                -webkit-animation-duration: 1s; /* Chrome, Safari, Opera */
+                animation-name: flashAnim;
+                animation-duration: 1s;
+            }
+            /* Chrome, Safari, Opera */
+            @-webkit-keyframes flashAnim {
+                0%  {background-color: white;}
+                50%  {background-color: yellow;}
+                100% {background-color: white;}
+            }
+            /* Standard syntax */
+            @keyframes flashAnim {
+                0%  {background-color: white;}
+                50%  {background-color: yellow;}
+                100% {background-color: white;}
+            }
+        </style>
+    <script type="text/javascript">
+        var curTab = '';
+
+        function selectTab(tabEle) {
+            tabId = tabEle.id;
+            curTab = tabId;
+            var tabLinks = document.getElementsByName("tabLink");
+            for (i = 0; i < tabLinks.length; ++i) {
+                tabLink = tabLinks[i];
+                tabDiv = document.getElementById(tabLink.id + 'Div');
+                if (tabLink.id == tabId) {
+                    tabLink.className = "w3-khaki";
+                    tabDiv.style.display = "block";
+                } else {
+                    tabLink.className = "w3-dark-grey";
+                    tabDiv.style.display = "none";
+                }
+            }
+            return false;
+        }
+        function selectTabById(tabId) {
+            var tabEle = document.getElementById(tabId);
+            return selectTab(tabEle);
+        }
+
+//         function getHistory() {
+//           var deviceSelector = document.getElementById("deviceHistorySelector");
+//           var deviceDays = document.getElementById("deviceHistoryDays");
+//           if ((deviceDays.value >= 1) && (deviceDays.value <= 14)) {
+//               var queryArgs = "device=" + deviceSelector.value + "&numDays=" + deviceDays.value;
+//         
+//               //document.getElementById("deviceEvents").innerHTML = 'Requesting data...';
+//               document.getElementById("deviceEvents").style="color:darkgray";
+//               var xhttp = new XMLHttpRequest();
+//               xhttp.onreadystatechange = function() {
+//                 if (xhttp.readyState == 4) {
+//                   var deviceEventsEle = document.getElementById("deviceEvents");
+//                   if (xhttp.status == 200) {
+//                     document.getElementById("deviceEvents").style="color:black";
+//                     var historyObj = JSON.parse(xhttp.responseText);
+//                     if (historyObj.length > 0) {
+//                        var historyTableHTML = '<table class="w3-table w3-striped w3-bordered w3-card-4 w3-large">';
+//                        var rowIndex;
+//                        for (rowIndex in historyObj) {
+//                           var rowData = historyObj[rowIndex];
+//                           var rowHTML =
+//                             '<tr>' +
+//                             '<td>' + rowData.devname + '</td>' +
+//                             '<td>' + rowData.eventname + '</td>' +
+//                             '<td>' + formatDateTime(rowData.timestamp) + '</td>' +
+//                             '</tr>';
+//                           historyTableHTML += rowHTML;
+//                        }
+//                        historyTableHTML += '</table>';
+//                        deviceEventsEle.innerHTML = historyTableHTML;
+//                     } else {
+//                         deviceEventsEle.innerHTML =
+//                            'No ' + deviceSelector.value + ' events during last ' +
+//                            deviceDays.value + ' day(s)';
+//                     }
+//                   } else {
+//                       deviceEventsEle.innerHTML = 'Reading data...';
+//                   }
+//                 }
+//               }
+//               xhttp.open("POST", "/history", true);
+//               xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+//               xhttp.send(queryArgs);
+//            } else {
+//               alert("please enter number of days between 1 and 14");
+//            }
+//         }
+
+        function showHistory (devname) {
+            var deviceSelector = document.getElementById("deviceHistorySelector");
+            deviceSelector.value = devname;
+//            getHistory();
+            return selectTabById('tab2');
+        }
+        
+//        function getStatus() {
+//              //document.getElementById("deviceEvents").innerHTML = 'Requesting data...';
+//              document.getElementById("deviceEvents").style="color:darkgray";
+//              var xhttp = new XMLHttpRequest();
+//              xhttp.onreadystatechange = function() {
+//                if (xhttp.readyState == 4) {
+//                  if (xhttp.status == 200) {
+//                    var statusData = JSON.parse(xhttp.responseText);
+//                    var statusHTML = '<table class="w3-table w3-striped w3-bordered w3-card-4 w3-large">';
+//                    var deviceSelectorHTML = '';
+//                    var devIndex;
+//                    for (devIndex in statusData) {
+//                        var dev = statusData[devIndex];
+//                        var timestamp = '';
+//                        if (dev.hasOwnProperty('timestamp')) {
+//                            timestamp = formatDateTime(dev.timestamp);
+//                        }
+//                        var cmd = findCommandAndLabel(dev.name, dev.state);
+//                        var cmdCell = '';
+//                        if (cmd !== null) {
+//                            cmdCell = '<button style="height:50px; width:100px;" id="devButton_' + dev.name +
+//                                '" onclick="sendCommand(&quot;' + cmd.name + ' ' + cmd.command + '&quot;)">' +
+//                                cmd.label + '</button>';
+//                        }
+//                        var devRow =
+//                            '<tr>' +
+//                            '<td>' + dev.name + '</td>' +
+//                            '<td id="devState_' + dev.name + '">' + dev.state + '</td>' +
+//                            '<td>' +
+//                                '<a href="#" id="devTimestamp_' + dev.name + '"' +
+//                                    ' onclick="return showHistory(\'' + dev.name + '\');">' +
+//                                timestamp + '</a></td>' +
+//                            '<td>' + cmdCell + '</td>' +
+//                            '</tr>';
+//                        statusHTML += devRow;
+//
+//                        // device selector
+//                        deviceSelectorHTML += 
+//                            '<option value="' + dev.name + '">' + dev.name + '</option>';
+//                        }
+//                        statusHTML += '</table>';
+//                    deviceStatusNode.innerHTML = statusHTML;
+//
+//                    var deviceSelectorEle = document.getElementById("deviceHistorySelector");
+//                    deviceSelectorEle.innerHTML = deviceSelectorHTML;
+//                    getHistory();
+//                  } else {
+//                      deviceStatusNode.innerHTML = 'Reading data...';
+//                  }
+//                }
+//              }
+//            xhttp.open("GET", "/status", true);
+//            xhttp.send(null);
+//        }
+
+    // from sitepoint.com "How to Capture CSS3 Animation Events in JavaScript" by Craig Buckler
+    var pfx = ["webkit", "moz", "MS", "o", ""];
+    function PrefixedEvent(element, type, callback) {
+    for (var p = 0; p < pfx.length; p++) {
+		if (!pfx[p]) type = type.toLowerCase();
+		element.addEventListener(pfx[p]+type, callback, false);
+	}
+    }
+    function animEnd (e) {
+       e.target.className = '';
+    }
+
+    </script>
+
+    </head>
+<body onload="selectTabById('tab1'); getStatus();">
+
+    <div class="w3-topnav w3-dark-grey w3-large" style="padding:0px 8px 2px 8px">
+        <a href="#" id="tab1" name="tabLink" onclick="return selectTab(this);">Boiler</a>
+        <a href="#" id="tab2" name="tabLink" onclick="return selectTab(this);">Oil Tank</a>
+        <a href="#" id="tab3" name="tabLink" onclick="return selectTab(this);">About</a>
+    </div>
+
+    <div class="w3-container w3-margin-top w3-margin-bottom">
+        <div id="tab1Div" class="w3-container" style="display:none">
+            <p>
+                Hi Carl - Over the next few weeks I'm going to be working on getting the oil tank gauge to display here,
+                so things may look strange at times...
+            </p>
+            <img id="boilerImage" src="images/NoImageData.png">
+                <br>
+            <div style="display:inline-block">Last updated:</div>
+            <div id="boilerDataTimestamp" style="display:inline-block">-</div>
+        </div>
+        <div id="tab2Div" class="w3-container" style="display:none">
+            <h4 style="display:inline-block">Oil Tank (future development)</h4>
+        </div>
+        <div id="tab3Div" class="w3-container" style="display:none">
+            <h4>About</h4>
+            <table class="w3-table w3-striped w3-bordered w3-card-4">
+                <tr>
+                    <td>Server connection status:</td>
+                    <td>
+                        <div id="connectionStatus">x.x</div>
+                    </td>
+                </tr>
+                <tr>
+                    <td>Node.JS Version:</td>
+                    <td>
+                        <div id="nodeID">x.x</div>
+                    </td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <footer class="w3-container w3-dark-grey w3-margin-top">
+        <button class="w3-btn w3-light-grey" onclick="window.location.href='/logout'" style="display:inline-block">Log Out</button>
+        <div id="username" style="display:inline-block">Username</div>
+        <div style="display:inline-block; float:right">Copyright &copy; 2017 Tony Zurolo</div>
+    </footer>
+
+    <script src="/socket.io/socket.io.js"></script>
+    
+    <script>
+      var xmlhttp = null;
+      var socket = null;
+
+      function formatDateTime (dtString) {
+        if (dtString.length > 0) {
+            dt = new Date(dtString);
+            formattedDt =
+                dt.toLocaleTimeString() + '<br>' +
+                (dt.getMonth() + 1) + '/' +
+                dt.getDate() + '/' +
+                dt.getFullYear();
+         } else {
+            formattedDt = '-';
+         }
+         
+         return formattedDt;
+      }
+      
+      function sendCommand (cmd)
+      {
+      socket.emit('command', cmd);
+      }
+
+      var finished = new Array(); // References to img objects which have finished downloading
+      
+        var SocketDataScanState = {
+            WAITING_FOR_NEXT_ITEM : 0,
+            READING_IMAGE_ELEMENT_NAME : 1,
+            READING_IMAGE_DATA : 2
+        }
+        var socketDataScanState = SocketDataScanState.WAITING_FOR_NEXT_ITEM;
+        
+        var imageElementName = '';
+        var imageDataStr = '';
+
+            console.log('starting...');
+    //      createImageLayer();
+
+            var connectionStatusNode = document.getElementById('connectionStatus');
+            var deviceStatusNode = document.getElementById('deviceStatus');
+
+            socket = io();
+
+            socket.on('connect', function(){
+                connectionStatusNode.innerHTML = 'connected';
+            });
+            socket.on('disconnect', function(){
+                connectionStatusNode.innerHTML = 'disconnected';
+                console.log('user disconnected');
+            });
+	    socket.on('tankData', function(msg){
+                var uint8Array = new Uint8Array(msg);
+                for (var i = 0; i < uint8Array.length; i++) {
+                    var ch = String.fromCharCode(uint8Array[i]);
+                    switch (socketDataScanState) {
+                       case SocketDataScanState.WAITING_FOR_NEXT_ITEM :
+                        if (ch == '<') {
+                            // start of image data
+                            imageElementName = '';
+                            socketDataScanState = SocketDataScanState.READING_IMAGE_ELEMENT_NAME;
+                        }
+                        break;
+                       case SocketDataScanState.READING_IMAGE_ELEMENT_NAME :
+                        if (ch == ':') {
+                            // end of image element name
+                            socketDataScanState = SocketDataScanState.READING_IMAGE_DATA;
+                            imageDataStr = '';
+                        } else {
+                            imageElementName += ch;
+                        }
+                       break;
+                       case SocketDataScanState.READING_IMAGE_DATA :
+                        if (ch == '>') {
+                            // end of image data
+                            // update the device state display
+                            boilerImageWidget = document.getElementById(imageElementName);
+                            boilerImageWidget.src = imageDataStr;
+
+                            socketDataScanState = SocketDataScanState.WAITING_FOR_NEXT_ITEM;
+                        } else {
+                            imageDataStr += ch;
+                        }
+                       break;
+                       }
+                }
+
+
+                // update the event time
+                timestampWidget = document.getElementById('boilerDataTimestamp');
+//                timestampWidget.innerHTML = formatDateTime(tankData.timestamp);
+                
+                curDate = new Date();
+                formattedDateStr =  curDate.toLocaleTimeString() + '<br>' +
+                    (curDate.getMonth() + 1) + '/' +
+                    curDate.getDate() + '/' +
+                    curDate.getFullYear();
+                timestampWidget.innerHTML = formattedDateStr;
+
+                
+	    });
+
+           console.log('done.');
+	</script>
+
+</body>
+</html>
