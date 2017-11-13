@@ -40,14 +40,21 @@ typedef std::map<std::string, cv::Scalar> ThresholdData;
 static ThresholdData thresholdData;
 static char b64code[500000];
 
-struct ROIDescriptor {
+ enum ROIContentType {
+     rct_imageOnly,
+     rct_dialGauge,
+     rct_indicatorPanel
+ };
+
+struct ROISpecification {
     std::string name;
     int topLeftX;   // percent
     int topLeftY;   // percent
     int width;
     int height;
+    ROIContentType contentType;
 };
-typedef std::vector<ROIDescriptor> ROIList;
+typedef std::vector<ROISpecification> ROIList;
 
 namespace {
 
@@ -169,18 +176,74 @@ void readCamImage (
         cv::FONT_HERSHEY_PLAIN, 1.0, cv::Scalar(255, 255, 0), 2);
 #endif
     for (ROIList::const_iterator rIter = ROIs.begin(); rIter != ROIs.end(); ++rIter) {
-        const ROIDescriptor& roiDesc = *rIter;
+        const ROISpecification& roiSpec = *rIter;
 #if 1
-     cv::Rect roi((frame.size().width * roiDesc.topLeftX) / 100,
-                  (frame.size().height * roiDesc.topLeftY) / 100,
+     cv::Rect roi((frame.size().width * roiSpec.topLeftX) / 100,
+                  (frame.size().height * roiSpec.topLeftY) / 100,
                   150, 150);
 #if 0
     // whole frame
     cv::Mat dst = frame;
 #else
+
     // ROI
     cv::Mat dst = cv::Mat(frame, roi);
 #endif
+
+    switch (roiSpec.contentType) {
+        case rct_dialGauge : {
+            cv::Mat cvImage;
+            cv::cvtColor(dst, cvImage, cv::COLOR_BGR2GRAY);
+            GaussianBlur(cvImage, cvImage, cv::Size(3,3), 2, 2);
+#if 1
+            // canny edge detection
+            cv::Canny(cvImage, cvImage, 100, 200, 3);
+
+#if 1
+            // probabilistic hough transform
+            std::vector<cv::Vec4i> lines;
+            cv::HoughLinesP(cvImage, lines, 1, CV_PI/180, 25, 50, 15 );
+            std::cout << lines.size() << " lines" << std::endl;
+            for( size_t i = 0; i < lines.size(); i++ ) {
+                cv::Vec4i l = lines[i];
+                line(dst, cv::Point(l[0], l[1]), cv::Point(l[2], l[3]), cv::Scalar(0,255,0), 1, CV_AA);
+            }
+#endif
+
+#if 0
+            cv::Ptr<cv::LineSegmentDetector> ls = cv::createLineSegmentDetector(cv::LSD_REFINE_STD);
+            std::vector<cv::Vec4f> lines_std;
+            ls->detect(cvImage, lines_std);
+            cv::Mat lineImage = cv::Mat::zeros(cvImage.rows, cvImage.cols, CV_8UC1);
+            ls->drawSegments(lineImage, lines_std);
+            dst = lineImage;
+#endif
+
+#else
+            // circle detection. In the end did not use this because
+            // the image of the gauge is too oval, due to the angle of the camera
+            // relative to the face of the gauge. The detected circle dances
+            // about a bit. Also needed to tweak the parameters,j expecially dp,
+            // to get it tor detect the right circle more or less reliably,
+            std::vector<cv::Vec3f> circles;
+            cv::HoughCircles(cvImage, circles, cv::HOUGH_GRADIENT, 4, cvImage.rows/8,
+                100,    // canny threshold
+                100,    // accumulator threshold
+                60,     // min radius
+                68);   // max radius
+            std::cout << "got " << circles.size() << " circles" << std::endl;
+
+            for (size_t i = 0; i < circles.size(); ++i) {
+                cv::Point center(cvRound(circles[i][0]), cvRound(circles[i][1]));
+                int radius = cvRound(circles[i][2]);
+                cv::circle(dst, center, radius, cv::Scalar(0, 255, 0), 3, 8, 0);
+            }
+#endif
+            }
+            break;
+        default :
+            break;
+    }
 
     std::vector<int> compression_params;
     compression_params.push_back(CV_IMWRITE_JPEG_QUALITY);
@@ -195,7 +258,7 @@ void readCamImage (
     const int b64Len2 = base64_encode_blockend(&b64code[b64Len], &b64State);
     //std::cerr << "len1: " << b64Len << ", len2: " << b64Len2 << std::endl;
 
-    serverImage = std::string("<" + roiDesc.name + ":data:image/jpeg;base64,");
+    serverImage = std::string("<" + roiSpec.name + ":data:image/jpeg;base64,");
 #if 0
     serverImage += "iVBORw0KGgoAA"
         "AANSUhEUgAAABAAAAAQAQMAAAAlPW0iAAAABlBMVEUAAAD///+l2Z/dAAAAM0l"
@@ -258,7 +321,7 @@ int main (const int argc, const char* argv[])
     cap.set(cv::CAP_PROP_FRAME_WIDTH, 320);
     cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
 #endif
-    cap.set(cv::CAP_PROP_BRIGHTNESS, 0.45);
+    cap.set(cv::CAP_PROP_BRIGHTNESS, 0.50);
 
     cap.set(cv::CAP_PROP_FPS, 15);
 
@@ -292,14 +355,16 @@ int main (const int argc, const char* argv[])
         std::cout << "connected to host" << std::endl;
 
     ROIList ROIs;
-    ROIDescriptor roi;
+    ROISpecification roi;
     roi.name = "pressureGaugeImage";
     roi.topLeftX = 65;
     roi.topLeftY = 5;
+    roi.contentType = rct_dialGauge;
     ROIs.push_back(roi);
     roi.name = "controlPanelImage";
     roi.topLeftX = 27;
     roi.topLeftY = 81;
+    roi.contentType = rct_indicatorPanel;
     ROIs.push_back(roi);
 
     char buffer[50000];
