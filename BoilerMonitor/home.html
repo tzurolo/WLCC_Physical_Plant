@@ -86,13 +86,13 @@
                     <td style="width:100%">Oil Tank Level % goes here</td>
                 </tr>
                 <tr>
-                    <td style="width:100">Pressure Gauge</td>
+                    <td style="width:100">Boiler Pressure Gauge</td>
                     <td style="width:160"><img width="300" height="300" id="pressureGaugeImage" src="images/NoImageData.png"></td>
                     <td style="width:100%">Boiler pressure PSI goes here</td>
                 </tr>
                 <tr>
-                    <td style="width:100">Control Panel</td>
-                    <td style="width:160"><img id="controlPanelImage" src="images/NoImageData.png"></td>
+                    <td style="width:100">Boiler Control Panel</td>
+                    <td style="width:160"><img width="300" height="300" id="controlPanelImage" src="images/NoImageData.png"></td>
                     <td style="width:100%">Boiler Status goes here</td>
                 </tr>
             </table>
@@ -130,8 +130,10 @@
     <script src="/socket.io/socket.io.js"></script>
     
     <script>
-      var xmlhttp = null;
       var socket = null;
+        var timestampWidget = document.getElementById('boilerDataTimestamp');
+        var connectionStatusNode = document.getElementById('connectionStatus');
+        var deviceStatusNode = document.getElementById('deviceStatus');
 
       function formatDateTime (dtString) {
         if (dtString.length > 0) {
@@ -148,90 +150,93 @@
          return formattedDt;
       }
       
+      function updateLastUpdateTime (timestampWidget)
+      {
+        // update the event time
+        curDate = new Date();
+        formattedDateStr =  curDate.toLocaleTimeString() + '<br>' +
+            (curDate.getMonth() + 1) + '/' +
+            curDate.getDate() + '/' +
+            curDate.getFullYear();
+        timestampWidget.innerHTML = formattedDateStr;
+      }
+      
       function sendCommand (cmd)
       {
-      socket.emit('command', cmd);
+          socket.emit('command', cmd);
       }
 
-      var finished = new Array(); // References to img objects which have finished downloading
-      
         var SocketDataScanState = {
             WAITING_FOR_NEXT_ITEM : 0,
             READING_IMAGE_ELEMENT_NAME : 1,
             READING_IMAGE_DATA : 2
         }
-        var socketDataScanState = SocketDataScanState.WAITING_FOR_NEXT_ITEM;
+
+        function ScanState() {
+            this.state = SocketDataScanState.WAITING_FOR_NEXT_ITEM;
+            this.imageElementName = '';
+            this.imageDataStr = '';
+        }
+
+        function processSocketData (data, scanState) {
+            var uint8Array = new Uint8Array(data);
+            for (var i = 0; i < uint8Array.length; i++) {
+                var ch = String.fromCharCode(uint8Array[i]);
+                switch (scanState.state) {
+                   case SocketDataScanState.WAITING_FOR_NEXT_ITEM :
+                    if (ch == '<') {
+                        // start of image data
+                        scanState.imageElementName = '';
+                        scanState.state = SocketDataScanState.READING_IMAGE_ELEMENT_NAME;
+                    }
+                    break;
+                   case SocketDataScanState.READING_IMAGE_ELEMENT_NAME :
+                    if (ch == ':') {
+                        // end of image element name
+                        scanState.state = SocketDataScanState.READING_IMAGE_DATA;
+                        scanState.imageDataStr = '';
+                    } else {
+                        scanState.imageElementName += ch;
+                    }
+                   break;
+                   case SocketDataScanState.READING_IMAGE_DATA :
+                    if (ch == '>') {
+                        // end of image data
+                        // update the device state display
+                        imageWidget = document.getElementById(scanState.imageElementName);
+                        imageWidget.src = scanState.imageDataStr;
+
+                        scanState.state = SocketDataScanState.WAITING_FOR_NEXT_ITEM;
+                    } else {
+                        scanState.imageDataStr += ch;
+                    }
+                   break;
+                   }
+            }
+            updateLastUpdateTime (timestampWidget)
+        }
         
-        var imageElementName = '';
-        var imageDataStr = '';
+        var socketBoilerDataScanState = new ScanState();
+        var socketTankDataScanState = new ScanState();
+        
+        console.log('starting...');
 
-            console.log('starting...');
-    //      createImageLayer();
+        socket = io();
+        socket.on('connect', function(){
+            connectionStatusNode.innerHTML = 'connected';
+        });
+        socket.on('disconnect', function(){
+            connectionStatusNode.innerHTML = 'disconnected';
+            console.log('user disconnected');
+        });
+        socket.on('boilerData', function(data){
+            processSocketData (data, socketBoilerDataScanState);
+        });
+        socket.on('tankData', function(data){
+            processSocketData (data, socketTankDataScanState);
+        });
 
-            var connectionStatusNode = document.getElementById('connectionStatus');
-            var deviceStatusNode = document.getElementById('deviceStatus');
-
-            socket = io();
-
-            socket.on('connect', function(){
-                connectionStatusNode.innerHTML = 'connected';
-            });
-            socket.on('disconnect', function(){
-                connectionStatusNode.innerHTML = 'disconnected';
-                console.log('user disconnected');
-            });
-	    socket.on('tankData', function(msg){
-                var uint8Array = new Uint8Array(msg);
-                for (var i = 0; i < uint8Array.length; i++) {
-                    var ch = String.fromCharCode(uint8Array[i]);
-                    switch (socketDataScanState) {
-                       case SocketDataScanState.WAITING_FOR_NEXT_ITEM :
-                        if (ch == '<') {
-                            // start of image data
-                            imageElementName = '';
-                            socketDataScanState = SocketDataScanState.READING_IMAGE_ELEMENT_NAME;
-                        }
-                        break;
-                       case SocketDataScanState.READING_IMAGE_ELEMENT_NAME :
-                        if (ch == ':') {
-                            // end of image element name
-                            socketDataScanState = SocketDataScanState.READING_IMAGE_DATA;
-                            imageDataStr = '';
-                        } else {
-                            imageElementName += ch;
-                        }
-                       break;
-                       case SocketDataScanState.READING_IMAGE_DATA :
-                        if (ch == '>') {
-                            // end of image data
-                            // update the device state display
-                            boilerImageWidget = document.getElementById(imageElementName);
-                            boilerImageWidget.src = imageDataStr;
-
-                            socketDataScanState = SocketDataScanState.WAITING_FOR_NEXT_ITEM;
-                        } else {
-                            imageDataStr += ch;
-                        }
-                       break;
-                       }
-                }
-
-
-                // update the event time
-                timestampWidget = document.getElementById('boilerDataTimestamp');
-//                timestampWidget.innerHTML = formatDateTime(tankData.timestamp);
-                
-                curDate = new Date();
-                formattedDateStr =  curDate.toLocaleTimeString() + '<br>' +
-                    (curDate.getMonth() + 1) + '/' +
-                    curDate.getDate() + '/' +
-                    curDate.getFullYear();
-                timestampWidget.innerHTML = formattedDateStr;
-
-                
-	    });
-
-           console.log('done.');
+        console.log('done.');
 	</script>
 
 </body>

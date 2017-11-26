@@ -106,30 +106,45 @@ turnLEDsOn();
 var CAMDATAPORT = 3000;
 
 var camDataServer = net.createServer(function(sock) {
-    console.log('CONNECTED: ' + sock.remoteAddress +':'+ sock.remotePort);
-    sock["mycounter"] = 0;
-    // other stuff is the same from here
-    // Add a 'data' event handler to this instance of socket
+    console.log('CONNECTED from camera program: ' + sock.remoteAddress +':'+ sock.remotePort);
     sock.on('data', function(data) {
-        sock.mycounter++;
-        // console.log('DATA ' + sock.remoteAddress + ', count: ' + sock.mycounter);
-        io.emit('tankData', data);
-        
+        io.emit('boilerData', data);
     });
-    
-    // Add a 'close' event handler to this instance of socket
     sock.on('close', function(data) {
-        console.log('CLOSED: ' + sock.remoteAddress +' '+ sock.remotePort);
+        console.log('camera program connection CLOSED: ' + sock.remoteAddress +' '+ sock.remotePort);
     });
     
 });
-
 camDataServer.listen(CAMDATAPORT, function() { //'listening' listener
-  console.log('camera data server bound');
+  console.log('tank data server bound');
 });
 
 //
 // End of data connection to camera program
+//
+
+//
+// Data connection to tank monitor
+//
+
+var TANKDATAPORT = 3001;
+
+var tankDataServer = net.createServer(function(sock) {
+    console.log('CONNECTED from tank monitor: ' + sock.remoteAddress +':'+ sock.remotePort);
+    sock.on('data', function(data) {
+        io.emit('tankData', data);
+    });
+    sock.on('close', function(data) {
+        console.log('tank monitor connection CLOSED: ' + sock.remoteAddress +' '+ sock.remotePort);
+    });
+    
+});
+tankDataServer.listen(TANKDATAPORT, function() { //'listening' listener
+  console.log('camera data server bound');
+});
+
+//
+// End of data connection to tank monitor
 //
 
 
@@ -140,7 +155,6 @@ var child = execFile('/home/pi/BoilerMonitor/BoilerMonitorCV', [ CAMDATAPORT.toS
 child.stdin.setEncoding('utf-8');
 
 child.stdout.on('data', function (data) {
-   // notify connected sockets of new data
    console.log('child stdout: "' + data + '"');
 });
 
@@ -192,10 +206,10 @@ app.get('/logout',
 // end of routes
 //
 
+// web socket connection to web page
 io.on('connection', function(socket){
     console.log('got a connection.');
   socket.on('command', function(msg){
-//      sendCommandToMicrocontroller(msg);
       console.log('got command: ' + msg);
   });
   socket.on('disconnect', function () {

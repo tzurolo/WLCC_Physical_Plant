@@ -178,17 +178,11 @@ void readCamImage (
     for (ROIList::const_iterator rIter = ROIs.begin(); rIter != ROIs.end(); ++rIter) {
         const ROISpecification& roiSpec = *rIter;
 #if 1
-     cv::Rect roi((frame.size().width * roiSpec.topLeftX) / 100,
-                  (frame.size().height * roiSpec.topLeftY) / 100,
-                  150, 150);
-#if 0
-    // whole frame
-    cv::Mat dst = frame;
-#else
-
-    // ROI
-    cv::Mat dst = cv::Mat(frame, roi);
-#endif
+        // ROI
+        cv::Rect roi((frame.size().width * roiSpec.topLeftX) / 100,
+                     (frame.size().height * roiSpec.topLeftY) / 100,
+                     150, 150);
+        cv::Mat dst = cv::Mat(frame, roi);
 
     switch (roiSpec.contentType) {
         case rct_dialGauge : {
@@ -197,13 +191,36 @@ void readCamImage (
             GaussianBlur(cvImage, cvImage, cv::Size(3,3), 2, 2);
 #if 1
             // canny edge detection
-            cv::Canny(cvImage, cvImage, 100, 200, 3);
-
+            cv::Canny(cvImage, cvImage, 75, 200, 3);
 #if 1
+            std::vector<std::vector<cv::Point> > contours;
+            std::vector<cv::Vec4i> hierarchy;
+            cv::findContours(cvImage, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE);
+
+            //cv::RNG rng(12345);
+            int largestContourIndex = -1;
+            double largestContourArea = 0.0;
+            for (int i = 0; i < contours.size(); ++i) {
+                double contourArea = cv::contourArea(contours[i]);
+                if (contourArea > largestContourArea) {
+                    largestContourArea = contourArea;
+                    largestContourIndex = i;
+                }
+            }
+            if (largestContourArea > 1000.0) {
+                std::cout << contours[largestContourIndex].size() << " vertices, area=" <<
+                    largestContourArea << std::endl;
+                cv::Scalar color = cv::Scalar(0, 255, 0);
+                cv::drawContours(dst, contours, largestContourIndex, color, 2, 8, hierarchy, 0, cv::Point() );
+            }
+
+#endif
+#if 0
             // probabilistic hough transform
             std::vector<cv::Vec4i> lines;
             cv::HoughLinesP(cvImage, lines, 1, CV_PI/180, 25, 50, 15 );
-            std::cout << lines.size() << " lines" << std::endl;
+            //cv::cvtColor(cvImage, dst, cv::COLOR_GRAY2BGR);
+            //std::cout << lines.size() << " lines" << std::endl;
             for( size_t i = 0; i < lines.size(); i++ ) {
                 cv::Vec4i l = lines[i];
                 line(dst, cv::Point(l[0], l[1]), cv::Point(l[2], l[3]), cv::Scalar(0,255,0), 1, CV_AA);
