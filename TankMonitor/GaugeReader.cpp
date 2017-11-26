@@ -24,6 +24,14 @@ protocols:
 #include <math.h>
 #include <stdio.h>
 #include <time.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h> 
 #include <opencv2/opencv.hpp>
 extern "C" {
 #include <b64/cencode.h>
@@ -252,6 +260,8 @@ void readCamImage (
     cv::Rect roi((frame.cols / 2) - 100, (frame.rows / 2) - 100, 200, 200);
     cv::Mat dst = cv::Mat(frame, roi);
 
+    imwrite("gauge1.png", dst);
+
     std::vector<int> compression_params;
     compression_params.push_back(CV_IMWRITE_JPEG_QUALITY);
     compression_params.push_back(80); // 1-100
@@ -308,7 +318,44 @@ int main (const int argc, const char* argv[])
 
     cv::VideoCapture cap(0); // open the default camera
     if(!cap.isOpened()) {  // check if we succeeded
+        std::cout << "failed to open camera" << std::endl;
         return -1;
+    }
+
+    cap.set(cv::CAP_PROP_FRAME_WIDTH, 320);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+    cap.set(cv::CAP_PROP_BRIGHTNESS, 0.65);
+
+    //cap.set(cv::CAP_PROP_FPS, 15);
+
+    // set up output data socket
+    int sockfd, portno, n;
+    struct sockaddr_in serv_addr;
+    struct hostent *server;
+
+    if (argc < 2) {
+       fprintf(stderr,"usage %s port\n", argv[0]);
+       exit(0);
+    }
+    portno = atoi(argv[1]);
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        fprintf(stderr,"ERROR opening socket");
+    }
+    bzero(&serv_addr,sizeof(serv_addr));
+    serv_addr.sin_family=AF_INET;
+    serv_addr.sin_port=htons(portno);
+ 
+    const int ret = inet_pton(AF_INET,"192.168.1.71",&(serv_addr.sin_addr));
+    if (ret != 1) {
+        fprintf(stderr,"ERROR from inet_pton");
+        exit(0);
+    }
+    if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) {
+        fprintf(stderr,"ERROR connecting");
+        exit(0);
+    } else {
+        std::cout << "connected to host" << std::endl;
     }
 
     // read color threshold data
