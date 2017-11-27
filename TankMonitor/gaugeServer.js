@@ -1,3 +1,5 @@
+var net = require('net');
+var Gpio = require('onoff').Gpio;
 var childProcess = require('child_process');
 var exec = childProcess.exec;
 var execFile = childProcess.execFile;
@@ -26,12 +28,29 @@ function minutesToMilliseconds (minutes) {
 //
 // turn on LEDs
 //
-function turnLEDsOn () {
-    exec('gpio mode 0 out && gpio write 0 1');
-}
+var LEDs = new Gpio(17, 'out');
+LEDs.writeSync(1);
 
-turnLEDsOn();
+//
+//  Connection to Boiler Room server
+//
+var client = new net.Socket();
+client.connect(3001, 'localhost', function() {
+    console.log('Connected to boiler room server');
+});
 
+client.on('data', function(data) {
+    console.log('Received: ' + data);
+});
+
+client.on('close', function() {
+    console.log('Connection closed');
+});
+//
+//  end of Connection to Boiler Room server
+//
+
+/*
 //
 //  child process for reading cam and opencv analysis
 //
@@ -49,6 +68,7 @@ child.stderr.on('data', function (data) {
 //
 //  end of child process for reading cam and opencv analysis
 //
+*/
 
 // 
 // tmp102 temperature sensor
@@ -77,3 +97,14 @@ setInterval(function(){ readTemp(); }, minutesToMilliseconds(settings.tempSample
 //
 
 console.log('Version: ' + process.version);
+
+//
+// exit handler
+//
+function unexportOnClose() { //function to run when exiting program
+    LEDs.writeSync(0); // Turn LED off
+    LEDs.unexport(); // Unexport LED GPIO to free resources
+    client.destroy(); // kill client upon exit
+    process.exit();
+};
+process.on('SIGINT', unexportOnClose);
