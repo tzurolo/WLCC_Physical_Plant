@@ -33,6 +33,7 @@ protocols:
 #include <arpa/inet.h>
 #include <netdb.h> 
 #include <opencv2/opencv.hpp>
+#include <raspicam/raspicam_cv.h>
 extern "C" {
 #include <b64/cencode.h>
 }
@@ -121,7 +122,8 @@ void getCurrentTimeStrings (
 }
 
 void readCamImage (
-    cv::VideoCapture &cap,
+    raspicam::RaspiCam_Cv &cam,
+//    cv::VideoCapture &cap,
     int &tankLevel, // in units of percent
     std::string &serverJSON)
 {
@@ -137,11 +139,15 @@ void readCamImage (
 
     // get image from camera
     cv::Mat frame;
+#if 1
+    cam.grab();
+    cam.retrieve(frame);
+#else
     for (int f = 0; f < 6; ++f) {   // this loop is a hack to flush out old frames from the buffer
                                     // TODO: use a thread to continuously grab
         cap >> frame; // get a new frame from camera
     }
-
+#endif
     // get timestamp strings
     std::string forImageAnnotation;
     std::string forFilespec;
@@ -257,8 +263,12 @@ void readCamImage (
     cv::putText(frame, annotationBuf, cv::Point(10, frame.size().height - 30), 
         cv::FONT_HERSHEY_PLAIN, 2.0, cv::Scalar(255, 255, 0));
 #if 1
+#if 0
     cv::Rect roi((frame.cols / 2) - 100, (frame.rows / 2) - 100, 200, 200);
     cv::Mat dst = cv::Mat(frame, roi);
+#else
+    cv::Mat dst = frame;
+#endif
 
     imwrite("gauge1.png", dst);
 
@@ -315,7 +325,14 @@ int main (const int argc, const char* argv[])
     // child process when that limit is reached.
     //static char buf[50000]; /* buf must survive until stdout is closed */
     //setvbuf ( stdout , buf , _IOFBF , sizeof(buf) );
+#if 1
+    raspicam::RaspiCam_Cv Camera;
+    Camera.set( CV_CAP_PROP_FORMAT, CV_8UC3 );
+    Camera.set( CV_CAP_PROP_FRAME_WIDTH, 320);
+    Camera.set( CV_CAP_PROP_FRAME_HEIGHT, 480);
+    if (!Camera.open()) {std::cerr<<"Error opening the camera"<<std::endl;return -1;}
 
+#else
     cv::VideoCapture cap(0); // open the default camera
     if(!cap.isOpened()) {  // check if we succeeded
         std::cout << "failed to open camera" << std::endl;
@@ -326,13 +343,14 @@ int main (const int argc, const char* argv[])
     cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
     cap.set(cv::CAP_PROP_BRIGHTNESS, 0.65);
 
-    //cap.set(cv::CAP_PROP_FPS, 15);
+    cap.set(cv::CAP_PROP_FPS, 15);
+#endif
 
     // set up output data socket
     int sockfd, portno, n;
     struct sockaddr_in serv_addr;
     struct hostent *server;
-
+/*
     if (argc < 2) {
        fprintf(stderr,"usage %s port\n", argv[0]);
        exit(0);
@@ -357,7 +375,7 @@ int main (const int argc, const char* argv[])
     } else {
         std::cout << "connected to host" << std::endl;
     }
-
+*/
     // read color threshold data
     const char* thresholdsFilename = "HomeThresholds.txt"; 
     readColorThresholdData(thresholdsFilename, thresholdData);
@@ -370,7 +388,7 @@ int main (const int argc, const char* argv[])
         if (cinStr == "readCam") {
             int tankLevel;
             std::string serverJSON;
-            readCamImage(cap, tankLevel, serverJSON);
+            readCamImage(Camera, tankLevel, serverJSON);
             std::cout << serverJSON << std::endl;
         }
     } while (cinStr != "exit");
