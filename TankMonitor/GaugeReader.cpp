@@ -129,7 +129,7 @@ void readCamImage (
 {
     tankLevel = 0;
 
-    std::cerr << "read cam image" << std::endl;
+    //std::cerr << "read cam image" << std::endl;
 
     cv::Mat edges;
     cv::Mat tedges;
@@ -258,10 +258,12 @@ void readCamImage (
     cv::rectangle(frame, floatBbox, cv::Scalar(0, 255, 0), 2);
     cv::rectangle(frame, caseBbox, cv::Scalar(255, 255, 255), 1);
 #endif
+#if 1
     char annotationBuf[80];
     sprintf(annotationBuf, "%s %d%%", forImageAnnotation.c_str(), tankLevel);
     cv::putText(frame, annotationBuf, cv::Point(10, frame.size().height - 30), 
         cv::FONT_HERSHEY_PLAIN, 2.0, cv::Scalar(255, 255, 0));
+#endif
 #if 1
 #if 0
     cv::Rect roi((frame.cols / 2) - 100, (frame.rows / 2) - 100, 200, 200);
@@ -283,9 +285,9 @@ void readCamImage (
     int b64Len = base64_encode_block((const char*)&jpeg_buffer[0], (int)jpeg_buffer.size(),
         b64code, &b64State);
     int b64Len2 = base64_encode_blockend(&b64code[b64Len], &b64State);
-    std::cerr << "len1: " << b64Len << ", len2: " << b64Len2 << std::endl;
+    //std::cerr << "len1: " << b64Len << ", len2: " << b64Len2 << std::endl;
 
-    std::string imageFilespec = std::string("data:image/jpeg;base64,");
+    std::string imageFilespec = std::string("<gaugeImage:data:image/jpeg;base64,");
 #if 0
     imageFilespec += "iVBORw0KGgoAA"
         "AANSUhEUgAAABAAAAAQAQMAAAAlPW0iAAAABlBMVEUAAAD///+l2Z/dAAAAM0l"
@@ -301,11 +303,14 @@ void readCamImage (
         }
     }
 #endif
+    imageFilespec += '>';
 
 #else
     const std::string imageFilespec = std::string("camImages/img") + forFilespec + ".png";
     cv::imwrite(imageFilespec, frame);
 #endif
+
+#if 0
     // create JSON to return to the server
     char tankLevelStr[20];
     sprintf(tankLevelStr, "%d", tankLevel);
@@ -313,6 +318,9 @@ void readCamImage (
         "\", \"imageFile\": \"" + imageFilespec +
         "\", \"timestamp\": \"" + forServerDatabase +
         "\"}";
+#else
+    serverJSON = imageFilespec;
+#endif
 }
 
 }   // namespace
@@ -328,8 +336,9 @@ int main (const int argc, const char* argv[])
 #if 1
     raspicam::RaspiCam_Cv Camera;
     Camera.set( CV_CAP_PROP_FORMAT, CV_8UC3 );
-    Camera.set( CV_CAP_PROP_FRAME_WIDTH, 320);
-    Camera.set( CV_CAP_PROP_FRAME_HEIGHT, 480);
+    Camera.set( CV_CAP_PROP_FRAME_WIDTH, 480);
+    Camera.set( CV_CAP_PROP_FRAME_HEIGHT, 320);
+    Camera.set( CV_CAP_PROP_BRIGHTNESS, 65);
     if (!Camera.open()) {std::cerr<<"Error opening the camera"<<std::endl;return -1;}
 
 #else
@@ -350,6 +359,35 @@ int main (const int argc, const char* argv[])
     int sockfd, portno, n;
     struct sockaddr_in serv_addr;
     struct hostent *server;
+
+    if (argc < 2) {
+       fprintf(stderr,"usage %s port\n", argv[0]);
+       exit(0);
+    }
+    portno = atoi(argv[1]);
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        fprintf(stderr,"ERROR opening socket");
+        exit(0);
+    }
+    server = gethostbyname("localhost");
+    if (server == NULL) {
+        fprintf(stderr,"ERROR, no such host\n");
+        exit(0);
+    }
+    bzero((char *) &serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    bcopy((char *)server->h_addr, 
+         (char *)&serv_addr.sin_addr.s_addr,
+         server->h_length);
+    serv_addr.sin_port = htons(portno);
+    if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) {
+        fprintf(stderr,"ERROR connecting");
+        exit(0);
+    } else {
+        std::cout << "connected to host" << std::endl;
+    }
+
 /*
     if (argc < 2) {
        fprintf(stderr,"usage %s port\n", argv[0]);
@@ -382,15 +420,27 @@ int main (const int argc, const char* argv[])
 
     std::string cinStr;
     do {
+#if 0
         std::cerr << "waiting for cmd" << std::endl;
         std::getline(std::cin, cinStr);
 
         if (cinStr == "readCam") {
+#endif
             int tankLevel;
             std::string serverJSON;
             readCamImage(Camera, tankLevel, serverJSON);
+    const int n = write(sockfd,serverJSON.c_str(), serverJSON.size());
+    if (n < 0) {
+            fprintf(stderr,"ERROR writing to socket");
+            exit(0);
+    } else {
+        //std::cout << "wrote " << n << " of " << serverImage.size() << " bytes." << std::endl;
+    }
+
+#if 0
             std::cout << serverJSON << std::endl;
         }
+#endif
     } while (cinStr != "exit");
     std::cout << "exiting" << std::endl;
     return 0;

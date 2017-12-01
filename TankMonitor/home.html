@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>WLCC Physical Plant</title>
+    <link rel="stylesheet" href="css/w3.css">
+</head>
+<body>
+
+            <img id="gaugeImage" src="images/NoImageData.png">
+
+    <script src="/socket.io/socket.io.js"></script>
+    
+    <script>
+      var socket = null;
+
+      function sendCommand (cmd)
+      {
+      socket.emit('command', cmd);
+      }
+
+        var SocketDataScanState = {
+            WAITING_FOR_NEXT_ITEM : 0,
+            READING_IMAGE_ELEMENT_NAME : 1,
+            READING_IMAGE_DATA : 2
+        }
+
+        function ScanState() {
+            this.state = SocketDataScanState.WAITING_FOR_NEXT_ITEM;
+            this.imageElementName = '';
+            this.imageDataStr = '';
+        }
+
+        function processSocketData (data, scanState) {
+            var uint8Array = new Uint8Array(data);
+            for (var i = 0; i < uint8Array.length; i++) {
+                var ch = String.fromCharCode(uint8Array[i]);
+                switch (scanState.state) {
+                   case SocketDataScanState.WAITING_FOR_NEXT_ITEM :
+                    if (ch == '<') {
+                        // start of image data
+                        scanState.imageElementName = '';
+                        scanState.state = SocketDataScanState.READING_IMAGE_ELEMENT_NAME;
+                    }
+                    break;
+                   case SocketDataScanState.READING_IMAGE_ELEMENT_NAME :
+                    if (ch == ':') {
+                        // end of image element name
+                        scanState.state = SocketDataScanState.READING_IMAGE_DATA;
+                        scanState.imageDataStr = '';
+                    } else {
+                        scanState.imageElementName += ch;
+                    }
+                   break;
+                   case SocketDataScanState.READING_IMAGE_DATA :
+                    if (ch == '>') {
+                        // end of image data
+                        // update the device state display
+                        imageWidget = document.getElementById(scanState.imageElementName);
+                        imageWidget.src = scanState.imageDataStr;
+
+                        scanState.state = SocketDataScanState.WAITING_FOR_NEXT_ITEM;
+                    } else {
+                        scanState.imageDataStr += ch;
+                    }
+                   break;
+                   }
+            }
+            //updateLastUpdateTime (timestampWidget)
+        }
+        
+        var socketBoilerDataScanState = new ScanState();
+
+            console.log('starting...');
+
+            socket = io();
+
+            socket.on('connect', function(){
+                console.log('user connected');
+            });
+            socket.on('disconnect', function(){
+                console.log('user disconnected');
+            });
+	    socket.on('boilerData', function(data){
+                processSocketData (data, socketBoilerDataScanState);
+	    });
+
+           console.log('done.');
+	</script>
+
+</body>
+</html>
