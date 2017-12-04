@@ -140,7 +140,7 @@ var tankDataServer = net.createServer(function(sock) {
     
 });
 tankDataServer.listen(TANKDATAPORT, function() { //'listening' listener
-  console.log('camera data server bound');
+  console.log('tank data server bound');
 });
 
 //
