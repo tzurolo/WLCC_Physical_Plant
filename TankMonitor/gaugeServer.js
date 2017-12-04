@@ -35,7 +35,7 @@ LEDs.writeSync(1);
 //  Connection to Boiler Room server
 //
 var client = new net.Socket();
-client.connect(3001, 'localhost', function() {
+client.connect(3001, '192.168.1.71', function() {
     console.log('Connected to boiler room server');
 });
 
@@ -50,11 +50,37 @@ client.on('close', function() {
 //  end of Connection to Boiler Room server
 //
 
-/*
+//
+// Data connection to camera program
+//
+
+var CAMDATAPORT = 3000;
+var camDataSocket = null;
+
+var camDataServer = net.createServer(function(sock) {
+    console.log('CONNECTED from camera program: ' + sock.remoteAddress +':'+ sock.remotePort);
+    camDataSocket = sock;
+    sock.on('data', function(data) {
+        client.write(data);
+    });
+    sock.on('close', function(data) {
+        camDataSocket = null;
+        console.log('camera program connection CLOSED: ' + sock.remoteAddress +' '+ sock.remotePort);
+    });
+    
+});
+camDataServer.listen(CAMDATAPORT, function() { //'listening' listener
+  console.log('tank data server bound');
+});
+
+//
+// End of data connection to camera program
+//
+
 //
 //  child process for reading cam and opencv analysis
 //
-var child = execFile('/home/pi/TankMonitor/GaugeReader');
+var child = execFile('/home/pi/TankMonitor/GaugeReader', [ CAMDATAPORT.toString() ]);
 child.stdin.setEncoding('utf-8');
 
 child.stdout.on('data', function (data) {
@@ -68,7 +94,6 @@ child.stderr.on('data', function (data) {
 //
 //  end of child process for reading cam and opencv analysis
 //
-*/
 
 // 
 // tmp102 temperature sensor

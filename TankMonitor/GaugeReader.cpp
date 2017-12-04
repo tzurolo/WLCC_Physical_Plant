@@ -26,6 +26,7 @@ protocols:
 #include <time.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -88,10 +89,7 @@ void getCurrentTimeStrings (
     char dateTimeString[40];
 
     // for image annotation
-    sprintf(dateTimeString, "%04d-%02d-%02d %02d:%02d:%02d.%02d",
-        localnow.tm_year + 1900,
-        localnow.tm_mon + 1,
-        localnow.tm_mday,
+    sprintf(dateTimeString, "%02d:%02d:%02d.%02d",
         localnow.tm_hour,
         localnow.tm_min,
         localnow.tm_sec,
@@ -259,24 +257,32 @@ void readCamImage (
     cv::rectangle(frame, caseBbox, cv::Scalar(255, 255, 255), 1);
 #endif
 #if 1
-    char annotationBuf[80];
-    sprintf(annotationBuf, "%s %d%%", forImageAnnotation.c_str(), tankLevel);
-    cv::putText(frame, annotationBuf, cv::Point(10, frame.size().height - 30), 
-        cv::FONT_HERSHEY_PLAIN, 2.0, cv::Scalar(255, 255, 0));
-#endif
 #if 1
-#if 0
-    cv::Rect roi((frame.cols / 2) - 100, (frame.rows / 2) - 100, 200, 200);
+    cv::Rect roi(150, 190, 150, 300);
     cv::Mat dst = cv::Mat(frame, roi);
 #else
     cv::Mat dst = frame;
 #endif
+#if 0
+    cv::Mat cvImage;
+    cv::cvtColor(dst, cvImage, cv::COLOR_BGR2GRAY);
+    GaussianBlur(cvImage, cvImage, cv::Size(3,3), 2, 2);
+#endif
+#if 0
+    // canny edge detection
+    cv::Canny(cvImage, dst, 75, 200, 3);
+#endif
 
-    imwrite("gauge1.png", dst);
+#if 1
+    char annotationBuf[80];
+    sprintf(annotationBuf, "%s %d%%", forImageAnnotation.c_str(), tankLevel);
+    cv::putText(dst, annotationBuf, cv::Point(10, dst.size().height - 30), 
+        cv::FONT_HERSHEY_PLAIN, 1.0, cv::Scalar(255, 255, 0));
+#endif
 
     std::vector<int> compression_params;
     compression_params.push_back(CV_IMWRITE_JPEG_QUALITY);
-    compression_params.push_back(80); // 1-100
+    compression_params.push_back(95); // 1-100
     std::vector<uint8_t> jpeg_buffer;
     cv::imencode(".jpg", dst, jpeg_buffer, compression_params);
 
@@ -287,7 +293,7 @@ void readCamImage (
     int b64Len2 = base64_encode_blockend(&b64code[b64Len], &b64State);
     //std::cerr << "len1: " << b64Len << ", len2: " << b64Len2 << std::endl;
 
-    std::string imageFilespec = std::string("<gaugeImage:data:image/jpeg;base64,");
+    std::string imageFilespec = std::string("<tankGaugeImage:data:image/jpeg;base64,");
 #if 0
     imageFilespec += "iVBORw0KGgoAA"
         "AANSUhEUgAAABAAAAAQAQMAAAAlPW0iAAAABlBMVEUAAAD///+l2Z/dAAAAM0l"
@@ -335,10 +341,36 @@ int main (const int argc, const char* argv[])
     //setvbuf ( stdout , buf , _IOFBF , sizeof(buf) );
 #if 1
     raspicam::RaspiCam_Cv Camera;
+    const double width = Camera.get( CV_CAP_PROP_FRAME_WIDTH);
+    const double height = Camera.get( CV_CAP_PROP_FRAME_HEIGHT);
+    const double brightness = Camera.get( CV_CAP_PROP_BRIGHTNESS);
+    const double constrast = Camera.get( CV_CAP_PROP_CONTRAST);
+    const double gain = Camera.get( CV_CAP_PROP_GAIN);
+    const double saturation = Camera.get( CV_CAP_PROP_SATURATION);
+    const double exposure = Camera.get( CV_CAP_PROP_EXPOSURE);
+    const double wb_red_v = Camera.get( CV_CAP_PROP_WHITE_BALANCE_RED_V);
+    const double wb_blue_u = Camera.get( CV_CAP_PROP_WHITE_BALANCE_BLUE_U);
+    const double mode = Camera.get( CV_CAP_PROP_MODE);
+    std::cout << "width: " << width << std::endl;
+    std::cout << "height: " << height << std::endl;
+    std::cout << "brightness: " << brightness << std::endl;
+    std::cout << "constrast: " << constrast << std::endl;
+    std::cout << "gain: " << gain << std::endl;
+    std::cout << "saturation: " << saturation << std::endl;
+    std::cout << "exposure: " << exposure << std::endl;
+    std::cout << "wb_red_v: " << wb_red_v << std::endl;
+    std::cout << "wb_blue_u: " << wb_blue_u << std::endl;
+    std::cout << "mode: " << mode << std::endl;
+
     Camera.set( CV_CAP_PROP_FORMAT, CV_8UC3 );
     Camera.set( CV_CAP_PROP_FRAME_WIDTH, 480);
-    Camera.set( CV_CAP_PROP_FRAME_HEIGHT, 320);
-    Camera.set( CV_CAP_PROP_BRIGHTNESS, 65);
+    Camera.set( CV_CAP_PROP_FRAME_HEIGHT, 640);
+    Camera.set( CV_CAP_PROP_BRIGHTNESS, 80);
+    Camera.set( CV_CAP_PROP_CONTRAST, 100);
+    Camera.set( CV_CAP_PROP_SATURATION, 65);
+    //Camera.set( CV_CAP_PROP_GAIN, 85);
+    //Camera.set( CV_CAP_PROP_EXPOSURE, 85);
+    //Camera.set( CV_CAP_PROP_MODE, 2);
     if (!Camera.open()) {std::cerr<<"Error opening the camera"<<std::endl;return -1;}
 
 #else
@@ -386,7 +418,11 @@ int main (const int argc, const char* argv[])
         exit(0);
     } else {
         std::cout << "connected to host" << std::endl;
+        //fcntl(sockfd, F_SETFL, O_NONBLOCK);
     }
+    struct timeval tv;
+    fd_set readfds;
+
 
 /*
     if (argc < 2) {
@@ -420,22 +456,57 @@ int main (const int argc, const char* argv[])
 
     std::string cinStr;
     do {
+#if 1
+        FD_ZERO(&readfds);
+        FD_SET(sockfd, &readfds);
+        tv.tv_sec = 0;
+        tv.tv_usec = 250000;
+        select(sockfd+1, &readfds, NULL, NULL, &tv);
+
+        if (FD_ISSET(sockfd, &readfds)) {
+            char readBuf[512];
+            int readCount;
+            readCount = recv(sockfd, readBuf, sizeof(readBuf), 0);
+            if (readCount == -1) {
+                // check errono
+            } else if (readCount == 0) {
+                // socket closed by host
+            } else {
+                // got data
+                const std::string dataStr(&readBuf[0], readCount);
+                //std::cout << "got command: '" << dataStr << "'" << std::endl;
+                const std::string cmdArg = dataStr.substr(2);
+                const double cmdArgVal = atoi(cmdArg.c_str());
+                switch (dataStr[0]) {
+                    case 'B' : Camera.set( CV_CAP_PROP_BRIGHTNESS, cmdArgVal); break;
+                    case 'C' : Camera.set( CV_CAP_PROP_CONTRAST, cmdArgVal); break;
+                    case 'G' : Camera.set( CV_CAP_PROP_GAIN, cmdArgVal); break;
+                    case 'E' : Camera.set( CV_CAP_PROP_EXPOSURE, cmdArgVal); break;
+                    case 'S' : Camera.set( CV_CAP_PROP_SATURATION, cmdArgVal); break;
+                    default:    break;
+                }
+            }
+        } else {
+            // time to read and process a frame
+            int tankLevel;
+            std::string serverJSON;
+            readCamImage(Camera, tankLevel, serverJSON);
+            const int n = write(sockfd,serverJSON.c_str(), serverJSON.size());
+            if (n < 0) {
+                    fprintf(stderr,"ERROR writing to socket");
+                    exit(0);
+            } else {
+                //std::cout << "wrote " << n << " of " << serverImage.size() << " bytes." << std::endl;
+            }
+        }
+
+#endif
 #if 0
         std::cerr << "waiting for cmd" << std::endl;
         std::getline(std::cin, cinStr);
 
         if (cinStr == "readCam") {
 #endif
-            int tankLevel;
-            std::string serverJSON;
-            readCamImage(Camera, tankLevel, serverJSON);
-    const int n = write(sockfd,serverJSON.c_str(), serverJSON.size());
-    if (n < 0) {
-            fprintf(stderr,"ERROR writing to socket");
-            exit(0);
-    } else {
-        //std::cout << "wrote " << n << " of " << serverImage.size() << " bytes." << std::endl;
-    }
 
 #if 0
             std::cout << serverJSON << std::endl;
