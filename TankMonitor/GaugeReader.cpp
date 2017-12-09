@@ -119,14 +119,110 @@ void getCurrentTimeStrings (
     forServerDatabase = dateTimeString;
 }
 
+void sendImageToHost (
+    const std::string &annotation,
+    const std::string &imageID,
+    const int sockfd,
+    cv::Mat &image)
+{
+
+    if (!annotation.empty()) {
+        char annotationBuf[80];
+        sprintf(annotationBuf, "%s", annotation.c_str());
+        cv::putText(image, annotationBuf, cv::Point(10, image.size().height - 30), 
+            cv::FONT_HERSHEY_PLAIN, 1.0, cv::Scalar(255, 255, 0));
+    }
+
+    std::vector<int> compression_params;
+    compression_params.push_back(CV_IMWRITE_JPEG_QUALITY);
+    compression_params.push_back(95); // 1-100
+    std::vector<uint8_t> jpeg_buffer;
+    cv::imencode(".jpg", image, jpeg_buffer, compression_params);
+
+    base64_encodestate b64State;
+    base64_init_encodestate(&b64State);
+    int b64Len = base64_encode_block((const char*)&jpeg_buffer[0], (int)jpeg_buffer.size(),
+        b64code, &b64State);
+    int b64Len2 = base64_encode_blockend(&b64code[b64Len], &b64State);
+    //std::cerr << "len1: " << b64Len << ", len2: " << b64Len2 << std::endl;
+
+    std::string imageStr = std::string("<") + imageID + ":data:image/jpeg;base64,";
+    // the encoder puts in cr/lf every 72 chars
+    int len = (b64Len + b64Len2);
+    for (int i = 0; i < len; ++i) {
+        const char ch = b64code[i];
+        if ((ch != 10) && (ch != 13)) {
+            imageStr += ch;
+        }
+    }
+    imageStr += '>';
+
+    const int n = write(sockfd, imageStr.c_str(), imageStr.size());
+    if (n < 0) {
+        fprintf(stderr,"ERROR writing to socket");
+        exit(0);
+    } else {
+        //std::cout << "wrote " << n << " of " << serverImage.size() << " bytes." << std::endl;
+    }
+}
+
+void showHistogram (
+    const std::string &imageID,
+    const int sockfd,
+    cv::Mat &image)
+{
+  std::vector<cv::Mat> bgr_planes;
+  cv::split( image, bgr_planes );
+
+  /// Establish the number of bins
+  int histSize = 256;
+
+  /// Set the ranges ( for B,G,R) )
+  float range[] = { 0, 256 } ;
+  const float* histRange = { range };
+
+  bool uniform = true; bool accumulate = false;
+
+  cv::Mat b_hist, g_hist, r_hist;
+
+  /// Compute the histograms:
+  cv::calcHist( &bgr_planes[0], 1, 0, cv::Mat(), b_hist, 1, &histSize, &histRange, uniform, accumulate );
+  cv::calcHist( &bgr_planes[1], 1, 0, cv::Mat(), g_hist, 1, &histSize, &histRange, uniform, accumulate );
+  cv::calcHist( &bgr_planes[2], 1, 0, cv::Mat(), r_hist, 1, &histSize, &histRange, uniform, accumulate );
+
+  // Draw the histograms for B, G and R
+  int hist_w = 512; int hist_h = 400;
+  int bin_w = cvRound( (double) hist_w/histSize );
+
+  cv::Mat histImage( hist_h, hist_w, CV_8UC3, cv::Scalar( 0,0,0) );
+
+  /// Normalize the result to [ 0, histImage.rows ]
+  cv::normalize(b_hist, b_hist, 0, histImage.rows, cv::NORM_MINMAX, -1, cv::Mat() );
+  cv::normalize(g_hist, g_hist, 0, histImage.rows, cv::NORM_MINMAX, -1, cv::Mat() );
+  cv::normalize(r_hist, r_hist, 0, histImage.rows, cv::NORM_MINMAX, -1, cv::Mat() );
+
+  /// Draw for each channel
+  for( int i = 1; i < histSize; i++ )
+  {
+      line( histImage, cv::Point( bin_w*(i-1), hist_h - cvRound(b_hist.at<float>(i-1)) ) ,
+                       cv::Point( bin_w*(i), hist_h - cvRound(b_hist.at<float>(i)) ),
+                       cv::Scalar( 255, 0, 0), 2, 8, 0  );
+      line( histImage, cv::Point( bin_w*(i-1), hist_h - cvRound(g_hist.at<float>(i-1)) ) ,
+                       cv::Point( bin_w*(i), hist_h - cvRound(g_hist.at<float>(i)) ),
+                       cv::Scalar( 0, 255, 0), 2, 8, 0  );
+      line( histImage, cv::Point( bin_w*(i-1), hist_h - cvRound(r_hist.at<float>(i-1)) ) ,
+                       cv::Point( bin_w*(i), hist_h - cvRound(r_hist.at<float>(i)) ),
+                       cv::Scalar( 0, 0, 255), 2, 8, 0  );
+  }
+
+  sendImageToHost(std::string(), imageID, sockfd, histImage);
+}
+
 void readCamImage (
     raspicam::RaspiCam_Cv &cam,
 //    cv::VideoCapture &cap,
-    int &tankLevel, // in units of percent
-    std::string &serverJSON)
+    int sockfd)
 {
-    tankLevel = 0;
-
     //std::cerr << "read cam image" << std::endl;
 
     cv::Mat edges;
@@ -138,9 +234,11 @@ void readCamImage (
     // get image from camera
     cv::Mat frame;
 #if 1
+    // RaspiCam
     cam.grab();
     cam.retrieve(frame);
 #else
+    // OpenCV
     for (int f = 0; f < 6; ++f) {   // this loop is a hack to flush out old frames from the buffer
                                     // TODO: use a thread to continuously grab
         cap >> frame; // get a new frame from camera
@@ -257,8 +355,7 @@ void readCamImage (
     cv::rectangle(frame, caseBbox, cv::Scalar(255, 255, 255), 1);
 #endif
 #if 1
-#if 1
-    cv::Rect roi(150, 190, 150, 300);
+    cv::Rect roi(125, 190, 150, 350);
     cv::Mat dst = cv::Mat(frame, roi);
 #else
     cv::Mat dst = frame;
@@ -266,6 +363,8 @@ void readCamImage (
 #if 0
     cv::Mat cvImage;
     cv::cvtColor(dst, cvImage, cv::COLOR_BGR2GRAY);
+#endif
+#if 0
     GaussianBlur(cvImage, cvImage, cv::Size(3,3), 2, 2);
 #endif
 #if 0
@@ -273,60 +372,16 @@ void readCamImage (
     cv::Canny(cvImage, dst, 75, 200, 3);
 #endif
 
-#if 1
-    char annotationBuf[80];
-    sprintf(annotationBuf, "%s %d%%", forImageAnnotation.c_str(), tankLevel);
-    cv::putText(dst, annotationBuf, cv::Point(10, dst.size().height - 30), 
-        cv::FONT_HERSHEY_PLAIN, 1.0, cv::Scalar(255, 255, 0));
-#endif
-
-    std::vector<int> compression_params;
-    compression_params.push_back(CV_IMWRITE_JPEG_QUALITY);
-    compression_params.push_back(95); // 1-100
-    std::vector<uint8_t> jpeg_buffer;
-    cv::imencode(".jpg", dst, jpeg_buffer, compression_params);
-
-    base64_encodestate b64State;
-    base64_init_encodestate(&b64State);
-    int b64Len = base64_encode_block((const char*)&jpeg_buffer[0], (int)jpeg_buffer.size(),
-        b64code, &b64State);
-    int b64Len2 = base64_encode_blockend(&b64code[b64Len], &b64State);
-    //std::cerr << "len1: " << b64Len << ", len2: " << b64Len2 << std::endl;
-
-    std::string imageFilespec = std::string("<tankGaugeImage:data:image/jpeg;base64,");
 #if 0
-    imageFilespec += "iVBORw0KGgoAA"
-        "AANSUhEUgAAABAAAAAQAQMAAAAlPW0iAAAABlBMVEUAAAD///+l2Z/dAAAAM0l"
-        "EQVR4nGP4/5/h/1+G/58ZDrAz3D/McH8yw83NDDeNGe4Ug9C9zwz3gVLMDA/A6"
-        "P9/AFGGFyjOXZtQAAAAAElFTkSuQmCC";
-#else
-    // the encoder puts in cr/lf every 72 chars
-    int len = (b64Len + b64Len2);
-    for (int i = 0; i < len; ++i) {
-        const char ch = b64code[i];
-        if ((ch != 10) && (ch != 13)) {
-            imageFilespec += ch;
-        }
-    }
+    // histograms
+    cv::Rect baseroi(160, 475, 65, 50);
+    cv::Mat baseimage = cv::Mat(frame, baseroi);
+    cv::Rect floatroi(180, 350, 40, 17);
+    cv::Mat floatimage = cv::Mat(frame, floatroi);
+    showHistogram("histogram", sockfd, floatimage);
+    cv::rectangle(dst, floatroi, cv::Scalar(255, 255, 255), 2);
 #endif
-    imageFilespec += '>';
-
-#else
-    const std::string imageFilespec = std::string("camImages/img") + forFilespec + ".png";
-    cv::imwrite(imageFilespec, frame);
-#endif
-
-#if 0
-    // create JSON to return to the server
-    char tankLevelStr[20];
-    sprintf(tankLevelStr, "%d", tankLevel);
-    serverJSON = std::string("{ \"level\": \"") + tankLevelStr +
-        "\", \"imageFile\": \"" + imageFilespec +
-        "\", \"timestamp\": \"" + forServerDatabase +
-        "\"}";
-#else
-    serverJSON = imageFilespec;
-#endif
+    sendImageToHost(forImageAnnotation, "tankGaugeImage", sockfd, dst);
 }
 
 }   // namespace
@@ -460,7 +515,7 @@ int main (const int argc, const char* argv[])
         FD_ZERO(&readfds);
         FD_SET(sockfd, &readfds);
         tv.tv_sec = 0;
-        tv.tv_usec = 250000;
+        tv.tv_usec = 500000;
         select(sockfd+1, &readfds, NULL, NULL, &tv);
 
         if (FD_ISSET(sockfd, &readfds)) {
@@ -488,16 +543,7 @@ int main (const int argc, const char* argv[])
             }
         } else {
             // time to read and process a frame
-            int tankLevel;
-            std::string serverJSON;
-            readCamImage(Camera, tankLevel, serverJSON);
-            const int n = write(sockfd,serverJSON.c_str(), serverJSON.size());
-            if (n < 0) {
-                    fprintf(stderr,"ERROR writing to socket");
-                    exit(0);
-            } else {
-                //std::cout << "wrote " << n << " of " << serverImage.size() << " bytes." << std::endl;
-            }
+            readCamImage(Camera, sockfd);
         }
 
 #endif
