@@ -1,0 +1,52 @@
+﻿<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" >
+<head>
+    <title>Example rubber band drag over image</title>
+</head>
+<body>
+
+<img id="img1" src="https://wlccfacilities.dyndns.org:5051/images/gaugeSnapshot.png" onload="positionCanvas(this)">
+<canvas id="myCanvas" width="200" height="100" style="border:1px solid #d3d3d3;" onmousemove="drawRect(event)" onmousedown="startDrag(event)"
+onmouseup="stopDrag(event)">
+Your browser does not support the HTML5 canvas tag.</canvas>
+
+<script>
+var i = document.getElementById("img2");
+var c = document.getElementById("myCanvas");
+var startX = 0;
+var startY = 0;
+var dragging = false;
+
+function positionCanvas (image) {
+c.width = image.width;
+c.height = image.height;
+c.style.left = "4px";
+c.style.top = "4px";
+c.style.position = "absolute";
+}
+
+function drawRect(e) {
+if (dragging) {
+  var ctx = c.getContext("2d");
+  ctx.clearRect(0, 0, c.width, c.height);
+  ctx.strokeStyle="#FFFFFF";
+  ctx.strokeRect(startX, startY, e.x - startX, e.y - startY);
+}
+}
+
+function startDrag(e) {
+var ctx = c.getContext("2d");
+ctx.clearRect(0, 0, c.width, c.height);
+startX = e.x;
+startY = e.y;
+dragging = true;
+}
+
+function stopDrag(e) {
+dragging = false;
+alert('rect size: ' + (e.x - startX) + ' x ' + (e.y - startY));
+}
+</script>
+
+</body>
+</html>

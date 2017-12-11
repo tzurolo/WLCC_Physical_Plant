@@ -34,9 +34,23 @@ LEDs.writeSync(1);
 //
 //  Connection to Boiler Room server
 //
-var client = new net.Socket();
+var boilerRoomServerConnected = false;
+var connectRetryTimer = null;
+var client = null;
+
+function newSocket () {
+client = new net.Socket();
 client.connect(3001, '192.168.1.71', function() {
+    boilerRoomServerConnected = true;
+    if (connectRetryTimer !== null) {
+        clearInterval(connectRetryTimer);
+        connectRetryTimer = null;
+    }
     console.log('Connected to boiler room server');
+});
+
+client.on('error', function(e) {
+    console.log('error: ' + e);
 });
 
 client.on('data', function(data) {
@@ -44,8 +58,14 @@ client.on('data', function(data) {
 });
 
 client.on('close', function() {
-    console.log('Connection closed');
+    boilerRoomServerConnected = false;
+    if (connectRetryTimer == null) {
+        connectRetryTimer = setInterval(function(){ newSocket(); }, 15000);
+    }
+    console.log('Connection to boiler room server closed');
 });
+}
+newSocket();
 //
 //  end of Connection to Boiler Room server
 //
@@ -61,7 +81,9 @@ var camDataServer = net.createServer(function(sock) {
     console.log('CONNECTED from camera program: ' + sock.remoteAddress +':'+ sock.remotePort);
     camDataSocket = sock;
     sock.on('data', function(data) {
-        client.write(data);
+        if (boilerRoomServerConnected) {
+            client.write(data);
+        }
     });
     sock.on('close', function(data) {
         camDataSocket = null;
