@@ -125,31 +125,33 @@ void sendImageToHost (
     const int sockfd,
     cv::Mat &image)
 {
-
+    // put in annotation, if any
     if (!annotation.empty()) {
         char annotationBuf[80];
         sprintf(annotationBuf, "%s", annotation.c_str());
-        cv::putText(image, annotationBuf, cv::Point(10, image.size().height - 30), 
+        cv::putText(image, annotationBuf, cv::Point(10, image.size().height - 15), 
             cv::FONT_HERSHEY_PLAIN, 1.0, cv::Scalar(255, 255, 0));
     }
 
+    // convert the image to JPEG
     std::vector<int> compression_params;
     compression_params.push_back(CV_IMWRITE_JPEG_QUALITY);
     compression_params.push_back(95); // 1-100
     std::vector<uint8_t> jpeg_buffer;
     cv::imencode(".jpg", image, jpeg_buffer, compression_params);
 
+    // encode the JPEG image as base64
     base64_encodestate b64State;
     base64_init_encodestate(&b64State);
-    int b64Len = base64_encode_block((const char*)&jpeg_buffer[0], (int)jpeg_buffer.size(),
+    const int b64Len1 = base64_encode_block((const char*)&jpeg_buffer[0], (int)jpeg_buffer.size(),
         b64code, &b64State);
-    int b64Len2 = base64_encode_blockend(&b64code[b64Len], &b64State);
-    //std::cerr << "len1: " << b64Len << ", len2: " << b64Len2 << std::endl;
-
-    std::string imageStr = std::string("<") + imageID + ":data:image/jpeg;base64,";
+    const int b64Len2 = base64_encode_blockend(&b64code[b64Len1], &b64State);
+    const int encodedLen = (b64Len1 + b64Len2);
+    std::string imageStr;
+    imageStr.reserve(encodedLen);
+    imageStr = std::string("<") + imageID + ":data:image/jpeg;base64,";
     // the encoder puts in cr/lf every 72 chars
-    int len = (b64Len + b64Len2);
-    for (int i = 0; i < len; ++i) {
+    for (int i = 0; i < encodedLen; ++i) {
         const char ch = b64code[i];
         if ((ch != 10) && (ch != 13)) {
             imageStr += ch;
@@ -202,8 +204,7 @@ void showHistogram (
   cv::normalize(r_hist, r_hist, 0, histImage.rows, cv::NORM_MINMAX, -1, cv::Mat() );
 
   /// Draw for each channel
-  for( int i = 1; i < histSize; i++ )
-  {
+  for (int i = 1; i < histSize; ++i) {
       line( histImage, cv::Point( bin_w*(i-1), hist_h - cvRound(b_hist.at<float>(i-1)) ) ,
                        cv::Point( bin_w*(i), hist_h - cvRound(b_hist.at<float>(i)) ),
                        cv::Scalar( 255, 0, 0), 2, 8, 0  );

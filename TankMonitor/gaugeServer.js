@@ -1,11 +1,22 @@
+//
+// Oil Tank Gauge Server
+//
 var net = require('net');
 var Gpio = require('onoff').Gpio;
 var childProcess = require('child_process');
 var exec = childProcess.exec;
 var execFile = childProcess.execFile;
-
 var fs = require('fs');
 var i2c = require('i2c');
+
+// these packages are used to provide web access to this server
+// This is only used during calibration
+var http = require('http');
+var express = require('express');
+var app = express();
+var httpServer = http.createServer(app);
+var socketIo = require('socket.io')(httpServer);
+var net = require('net');
 
 // convert temperature from Centigrade to Fahrenheit
 function convertTempToF (
@@ -84,6 +95,7 @@ var camDataServer = net.createServer(function(sock) {
         if (boilerRoomServerConnected) {
             client.write(data);
         }
+        //socketIo.emit('boilerData', data);
     });
     sock.on('close', function(data) {
         camDataSocket = null;
@@ -144,6 +156,49 @@ setInterval(function(){ readTemp(); }, minutesToMilliseconds(settings.tempSample
 //
 
 console.log('Version: ' + process.version);
+
+//
+//  routes
+//
+app.get('/', function(req, res){
+    res.sendFile(__dirname + '/index.html');
+});
+app.get('/RaspiCamViewer', function(req, res){
+    res.sendFile(__dirname + '/RaspiCamViewer.html');
+});
+app.get('/status', function(req, res) {
+    queryStatus(res);
+});
+app.use('/css', express.static('css'));
+app.use('/images', express.static('images'));
+
+//
+// end of routes
+//
+
+//
+// web socket connection to web page
+//
+socketIo.on('connection', function(socket){
+    console.log('got a connection.');
+  socket.on('command', function(cmd){
+      //console.log('got command: ' + cmd);
+      if (camDataSocket !== null) {
+        camDataSocket.write(cmd + '\r');
+      }
+  });
+  socket.on('disconnect', function () {
+    console.log('lost connection.');
+  });
+});
+//
+// end of web socket connection to web page
+//
+
+var port = 5052;
+httpServer.listen(port, function(){
+  console.log('listening on *:' + port);
+});
 
 //
 // exit handler
