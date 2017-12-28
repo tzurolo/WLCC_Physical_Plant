@@ -39,43 +39,29 @@ extern "C" {
 #include <b64/cencode.h>
 }
 
+struct ImageThresholds {
+    cv::Scalar lower;
+    cv::Scalar upper;
+    ImageThresholds() :
+        lower(255, 255, 255),
+        upper(0, 0, 0)
+        {}
+};
+ImageThresholds floatThresholds;
+
 typedef std::map<std::string, cv::Scalar> ThresholdData;
 static ThresholdData thresholdData;
 static char b64code[500000];
+static bool fullFrame = false;
+static bool genHistogram = false;
+static cv::Rect histogramRoi(0, 0, 0, 0);
 
 namespace {
 
-void readColorThresholdData (
-    const std::string &thresholdsFilename,
-    ThresholdData &thresholds)
-{
-    std::ifstream thresholdsFile(thresholdsFilename.c_str());
-    if (thresholdsFile.is_open()) {
-        std::string line;
-        while ( getline (thresholdsFile ,line) ) {
-            // std::cout << line << '\n'
-            std::istringstream iss (line);
-            std::string name;
-            double y, cr, cb;
-            iss >> name >> y >> cr >> cb;
-            const cv::Scalar t(y, cr, cb);
-            thresholds[name] = t;
-        }
-        thresholdsFile.close();
-
-#if 0
-        // display data we read above
-        for (ThresholdData::const_iterator i = thresholds.begin();
-                i != thresholds.end(); ++i) {
-            std::cout << "  '" << i->first << "': " << 
-            i->second[0] << "," << i->second[1] << "," << i->second[2] << std::endl;
-        }
-#endif
-    } else {
-        std::cerr << "Unable to open file " << thresholdsFilename << std::endl;
+    bool isValidRoi (
+        const cv::Rect &roi) {
+        return ((roi.width > 7) && (roi.height > 7));
     }
-}
-
 void getCurrentTimeStrings (
     std::string &forImageAnnotation,    // 2015-12-27 01:54:18.86 (somewhat human-readable)
     std::string &forFilespec,           // 20151227T01541886 (like iso but without the punctuation)
@@ -168,40 +154,82 @@ void sendImageToHost (
     }
 }
 
+void updateThresholdsWithHist (
+    const cv::Mat &histData,
+    const int histSize,
+    const float histLevel,
+    const int thresholdChannel,
+    ImageThresholds &thresholds)
+{
+    // search for lower and upper edge of histogram curve at the given percentage
+    int lowerEdge = 0;
+    while ((histData.at<float>(lowerEdge) < histLevel) &&
+           (lowerEdge < histSize)) {
+        ++lowerEdge;
+    }
+    int upperEdge = histSize - 1;
+    while ((histData.at<float>(upperEdge) < histLevel) &&
+           (upperEdge > 0)) {
+        --upperEdge;
+    }
+    //std::cout << lowerEdge << ".." << upperEdge << std::endl;
+    if (lowerEdge < thresholds.lower[thresholdChannel]) {
+        thresholds.lower[thresholdChannel] = lowerEdge;
+    }
+    if (upperEdge > thresholds.upper[thresholdChannel]) {
+        thresholds.upper[thresholdChannel] = upperEdge;
+    }
+}
+
 void showHistogram (
     const std::string &imageID,
     const int sockfd,
     cv::Mat &image)
 {
-  std::vector<cv::Mat> bgr_planes;
-  cv::split( image, bgr_planes );
+    bool haveValidRoi = isValidRoi(histogramRoi);
+    std::vector<cv::Mat> bgr_planes;
+    if (haveValidRoi) {
+        cv::Mat srcImage = cv::Mat(image, histogramRoi);
+        cv::split( srcImage, bgr_planes );
+        //rectangle(image, histogramRoi, cv::Scalar(0, 255, 0));
+    } else {
+        cv::split( image, bgr_planes );
+    }
 
-  /// Establish the number of bins
-  int histSize = 256;
+    /// Establish the number of bins
+    int histSize = 256;
 
-  /// Set the ranges ( for B,G,R) )
-  float range[] = { 0, 256 } ;
-  const float* histRange = { range };
+    /// Set the ranges ( for B,G,R) )
+    float range[] = { 0, 256 } ;
+    const float* histRange = { range };
 
-  bool uniform = true; bool accumulate = false;
+    bool uniform = true; bool accumulate = false;
 
-  cv::Mat b_hist, g_hist, r_hist;
+    cv::Mat b_hist, g_hist, r_hist;
 
-  /// Compute the histograms:
-  cv::calcHist( &bgr_planes[0], 1, 0, cv::Mat(), b_hist, 1, &histSize, &histRange, uniform, accumulate );
-  cv::calcHist( &bgr_planes[1], 1, 0, cv::Mat(), g_hist, 1, &histSize, &histRange, uniform, accumulate );
-  cv::calcHist( &bgr_planes[2], 1, 0, cv::Mat(), r_hist, 1, &histSize, &histRange, uniform, accumulate );
+    /// Compute the histograms:
+    cv::calcHist( &bgr_planes[0], 1, 0, cv::Mat(), b_hist, 1, &histSize, &histRange, uniform, accumulate );
+    cv::calcHist( &bgr_planes[1], 1, 0, cv::Mat(), g_hist, 1, &histSize, &histRange, uniform, accumulate );
+    cv::calcHist( &bgr_planes[2], 1, 0, cv::Mat(), r_hist, 1, &histSize, &histRange, uniform, accumulate );
 
-  // Draw the histograms for B, G and R
-  int hist_w = 512; int hist_h = 400;
-  int bin_w = cvRound( (double) hist_w/histSize );
+    // Draw the histograms for B, G and R
+    int hist_w = 512; int hist_h = 400;
+    int bin_w = cvRound( (double) hist_w/histSize );
 
-  cv::Mat histImage( hist_h, hist_w, CV_8UC3, cv::Scalar( 0,0,0) );
+    cv::Mat histImage( hist_h, hist_w, CV_8UC3, cv::Scalar( 0,0,0) );
 
-  /// Normalize the result to [ 0, histImage.rows ]
-  cv::normalize(b_hist, b_hist, 0, histImage.rows, cv::NORM_MINMAX, -1, cv::Mat() );
-  cv::normalize(g_hist, g_hist, 0, histImage.rows, cv::NORM_MINMAX, -1, cv::Mat() );
-  cv::normalize(r_hist, r_hist, 0, histImage.rows, cv::NORM_MINMAX, -1, cv::Mat() );
+    /// Normalize the result to [ 0, histImage.rows ]
+    cv::normalize(b_hist, b_hist, 0, histImage.rows, cv::NORM_MINMAX, -1, cv::Mat() );
+    cv::normalize(g_hist, g_hist, 0, histImage.rows, cv::NORM_MINMAX, -1, cv::Mat() );
+    cv::normalize(r_hist, r_hist, 0, histImage.rows, cv::NORM_MINMAX, -1, cv::Mat() );
+
+    // update roi thresholds
+    const float histLevel = histImage.rows * 0.15;
+    if (haveValidRoi) {
+        updateThresholdsWithHist(b_hist, histSize, histLevel, 0, floatThresholds);
+        updateThresholdsWithHist(g_hist, histSize, histLevel, 1, floatThresholds);
+        updateThresholdsWithHist(r_hist, histSize, histLevel, 2, floatThresholds);
+    }
 
   /// Draw for each channel
   for (int i = 1; i < histSize; ++i) {
@@ -215,6 +243,57 @@ void showHistogram (
                        cv::Point( bin_w*(i), hist_h - cvRound(r_hist.at<float>(i)) ),
                        cv::Scalar( 0, 0, 255), 2, 8, 0  );
   }
+    if (haveValidRoi) {
+        const int lineY = hist_h - cvRound(histLevel);
+        line(histImage, cv::Point(bin_w * floatThresholds.lower[0], lineY),
+                        cv::Point(bin_w * floatThresholds.upper[0], lineY),
+                        cv::Scalar( 255, 0, 0), 2, 8, 0  );
+        line(histImage, cv::Point(bin_w * floatThresholds.lower[1], lineY + 4),
+                        cv::Point(bin_w * floatThresholds.upper[1], lineY + 4),
+                        cv::Scalar( 0, 255, 0), 2, 8, 0  );
+        line(histImage, cv::Point(bin_w * floatThresholds.lower[2], lineY + 8),
+                        cv::Point(bin_w * floatThresholds.upper[2], lineY + 8),
+                        cv::Scalar( 0, 0, 255), 2, 8, 0  );
+
+        // get a mask based on the thresholds
+        cv::Mat contourMask;
+        cv::inRange(image, floatThresholds.lower, floatThresholds.upper, contourMask);
+
+        // morphologically "close" the image (dilate then erode)
+        const int elementSizeForClose = 3;
+        cv::Mat elementForClose = cv::getStructuringElement( cv::MORPH_ELLIPSE,
+                       cv::Size( 2*elementSizeForClose + 1, 2*elementSizeForClose+1 ),
+                       cv::Point( elementSizeForClose, elementSizeForClose ) );
+        cv::dilate(contourMask, contourMask, elementForClose );
+        cv::erode(contourMask, contourMask, elementForClose );
+
+        // get the contours of the mask
+        std::vector<std::vector<cv::Point> > contours;
+        // Find contours
+        cv::findContours(contourMask, contours,
+            cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE, cv::Point(0, 0) );
+        if (!contours.empty()) {
+            // find the contour with biggest bbox
+            double maxContourArea = 0;
+            int largestContourIndex = -1;
+            for (int c = 0; c < contours.size(); ++c) {
+              const double contourArea = cv::contourArea(contours[c]);
+              if (contourArea > maxContourArea) {
+	        largestContourIndex = c;
+	        maxContourArea = contourArea;
+              }
+            }
+            if (largestContourIndex >= 0) {
+                cv::drawContours(image, contours, largestContourIndex, cv::Scalar(255, 0, 0), 2);
+                cv::Rect boundingRect = cv::boundingRect(contours[largestContourIndex]);
+
+                char msg[100];
+                sprintf(msg, "top: %d, width: %d, num contours: %d",
+                    boundingRect.y, boundingRect.width, contours.size());
+                std::cout << msg << std::endl;
+            }
+        }
+    }
 
   sendImageToHost(std::string(), imageID, sockfd, histImage);
 }
@@ -355,12 +434,13 @@ void readCamImage (
     cv::rectangle(frame, floatBbox, cv::Scalar(0, 255, 0), 2);
     cv::rectangle(frame, caseBbox, cv::Scalar(255, 255, 255), 1);
 #endif
-#if 1
-    cv::Rect roi(125, 190, 150, 350);
-    cv::Mat dst = cv::Mat(frame, roi);
-#else
-    cv::Mat dst = frame;
-#endif
+    cv::Mat dst;
+    if (fullFrame) {
+        dst = frame;
+    } else {
+        cv::Rect roi(80, 135, 115, 250);
+        dst = cv::Mat(frame, roi);
+    }
 #if 0
     cv::Mat cvImage;
     cv::cvtColor(dst, cvImage, cv::COLOR_BGR2GRAY);
@@ -373,15 +453,10 @@ void readCamImage (
     cv::Canny(cvImage, dst, 75, 200, 3);
 #endif
 
-#if 0
-    // histograms
-    cv::Rect baseroi(160, 475, 65, 50);
-    cv::Mat baseimage = cv::Mat(frame, baseroi);
-    cv::Rect floatroi(180, 350, 40, 17);
-    cv::Mat floatimage = cv::Mat(frame, floatroi);
-    showHistogram("histogram", sockfd, floatimage);
-    cv::rectangle(dst, floatroi, cv::Scalar(255, 255, 255), 2);
-#endif
+    if (genHistogram) {
+        // histograms
+        showHistogram("histogram", sockfd, dst);
+    }
     sendImageToHost(forImageAnnotation, "tankGaugeImage", sockfd, dst);
 }
 
@@ -419,8 +494,8 @@ int main (const int argc, const char* argv[])
     std::cout << "mode: " << mode << std::endl;
 
     Camera.set( CV_CAP_PROP_FORMAT, CV_8UC3 );
-    Camera.set( CV_CAP_PROP_FRAME_WIDTH, 480);
-    Camera.set( CV_CAP_PROP_FRAME_HEIGHT, 640);
+    Camera.set( CV_CAP_PROP_FRAME_WIDTH, 320);
+    Camera.set( CV_CAP_PROP_FRAME_HEIGHT, 480);
     Camera.set( CV_CAP_PROP_BRIGHTNESS, 80);
     Camera.set( CV_CAP_PROP_CONTRAST, 100);
     Camera.set( CV_CAP_PROP_SATURATION, 65);
@@ -507,8 +582,6 @@ int main (const int argc, const char* argv[])
     }
 */
     // read color threshold data
-    const char* thresholdsFilename = "HomeThresholds.txt"; 
-    readColorThresholdData(thresholdsFilename, thresholdData);
 
     std::string cinStr;
     do {
@@ -532,13 +605,25 @@ int main (const int argc, const char* argv[])
                 const std::string dataStr(&readBuf[0], readCount);
                 //std::cout << "got command: '" << dataStr << "'" << std::endl;
                 const std::string cmdArg = dataStr.substr(2);
-                const double cmdArgVal = atoi(cmdArg.c_str());
+                const int cmdArgVal = atoi(cmdArg.c_str());
                 switch (dataStr[0]) {
                     case 'B' : Camera.set( CV_CAP_PROP_BRIGHTNESS, cmdArgVal); break;
                     case 'C' : Camera.set( CV_CAP_PROP_CONTRAST, cmdArgVal); break;
                     case 'G' : Camera.set( CV_CAP_PROP_GAIN, cmdArgVal); break;
                     case 'E' : Camera.set( CV_CAP_PROP_EXPOSURE, cmdArgVal); break;
                     case 'S' : Camera.set( CV_CAP_PROP_SATURATION, cmdArgVal); break;
+                    case 'H' : genHistogram = (cmdArgVal == 1);  break;
+                    case 'F' : fullFrame = (cmdArgVal == 1);  break;
+                    case 'R' : {    // get histogram rectangle
+                        sscanf(cmdArg.c_str(), "%d %d %d %d",
+                                &histogramRoi.x,
+                                &histogramRoi.y,
+                                &histogramRoi.width,
+                                &histogramRoi.height);
+                               }
+                        floatThresholds = ImageThresholds();
+
+                               break;
                     default:    break;
                 }
             }

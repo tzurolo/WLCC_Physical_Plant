@@ -2,35 +2,161 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>RasPi Cam Viewer</title>
+    <title>Camera Settings</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="css/w3.css">
 </head>
 <body>
-
-    <input type="range" min="1" max="100" value="50" id="B"
-        oninput="sendCommand(this.id + ' ' + this.value)" > <br>
-    <input type="range" min="1" max="100" value="50" id="C"
-        oninput="sendCommand(this.id + ' ' + this.value)" > <br>
-    <input type="range" min="1" max="100" value="50" id="G"
-        oninput="sendCommand(this.id + ' ' + this.value)" > <br>
-    <input type="range" min="1" max="100" value="50" id="E"
-        oninput="sendCommand(this.id + ' ' + this.value)" > <br>
-    <input type="range" min="1" max="100" value="50" id="S"
-        oninput="sendCommand(this.id + ' ' + this.value)" > <br>
-        
-    <img id="tankGaugeImage" src="images/NoImageData.png">
-    <img id="histogram" src="images/NoImageData.png">
-        
-
-    <script src="/socket.io/socket.io.js"></script>
+    <h2>Camera Settings for Object Detection</h2>
+                <div style="display:inline-block; position: relative; width: 320px; height: 480px;">
+                    <div style="position:absolute;">
+                        <img id="tankGaugeImage" src="images/NoImageData.png" onload="positionCanvas(this)">
+                    </div>
+                    <div style="position:absolute;">
+                        <canvas id="myCanvas" style="border:1px solid #d3d3d3"
+                            onmousemove="drawRect(event)"
+                            onmousedown="startDrag(event)"
+                            onmouseup="stopDrag(event)">
+                            Your browser does not support the HTML5 canvas tag.
+                        </canvas>
+                    </div>
+                </div>
+                <div style="display:inline-block; position: relative; width: 512px; height: 400px;">
+                    <img id="histogram" src="images/NoImageData.png">
+                </div>
+                    <p>
+                        
+                    </p>
+        <div class="w3-row">
+            <div class="w3-col l4 m6 w3-card-4">
+                <p>
+                <div class="w3-row">
+                    <div class="w3-col l4 m6 s4 w3-right-align w3-light-grey w3-container">
+                        Brightness:
+                    </div>
+                    <div class="w3-col l6 m6 s2 w3-yellow w3-container">
+                        <input type="range" min="1" max="100" value="50" id="B"
+                            oninput="sendCommand(this.id + ' ' + this.value)" >
+                    </div>
+                </div>
+                <div class="w3-row">
+                    <div class="w3-col l4 m6 s4 w3-right-align w3-light-grey w3-container">
+                        Contrast:
+                    </div>
+                    <div class="w3-col l6 m6 s2 w3-yellow w3-container">
+                        <input type="range" min="1" max="100" value="50" id="C"
+                            oninput="sendCommand(this.id + ' ' + this.value)" >
+                    </div>
+                </div>
+                <div class="w3-row">
+                    <div class="w3-col l4 m6 s4 w3-right-align w3-light-grey w3-container">
+                        Gain:
+                    </div>
+                    <div class="w3-col l6 m6 s2 w3-yellow w3-container">
+                        <input type="range" min="1" max="100" value="50" id="G"
+                            oninput="sendCommand(this.id + ' ' + this.value)" >
+                    </div>
+                </div>
+                <div class="w3-row">
+                    <div class="w3-col l4 m6 s4 w3-right-align w3-light-grey w3-container">
+                        Exposure:
+                    </div>
+                    <div class="w3-col l6 m6 s2 w3-yellow w3-container">
+                        <input type="range" min="1" max="100" value="50" id="E"
+                            oninput="sendCommand(this.id + ' ' + this.value)" >
+                    </div>
+                </div>
+                <div class="w3-row">
+                    <div class="w3-col l4 m6 s4 w3-right-align w3-light-grey w3-container">
+                        Saturation:
+                    </div>
+                    <div class="w3-col l6 m6 s2 w3-yellow w3-container">
+                        <input type="range" min="1" max="100" value="50" id="S"
+                            oninput="sendCommand(this.id + ' ' + this.value)" >
+                    </div>
+                </div>
+                </p>
+            </div>
+            <div class="w3-col l4 m6 w3-container">
+                <div class="w3-row">
+                    <div class="w3-col l3 m4 s5 w3-container">
+                        <button class="w3-button w3-round-large">Accept float thresholds</button>
+                    </div>
+                    <div class="w3-col l3 m4 s5 w3-container">
+                        <button class="w3-button w3-round-large">Accept base thresholds</button>
+                    </div>
+                </div>
+                <div class="w3-row">
+                    <div class="w3-col l3 m4 s5 w3-container">
+                        <button class="w3-button w3-round-large">Save to file</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script src="/socket.io/socket.io.js"></script>
     
     <script>
-      var socket = null;
+        function getEventCoords(e) {
+            var cbr = e.target.getBoundingClientRect();
+            var coords = { x : (e.x - cbr.left), y : Math.round(e.y - cbr.top) };
+            return coords;
+        }
+        //
+        // rectangle drag on transparent canvas
+        //
+        var c = document.getElementById("myCanvas");
+        var startX = 0;
+        var startY = 0;
+        var dragging = false;
 
-      function sendCommand (cmd)
-      {
-      socket.emit('command', cmd);
-      }
+        function positionCanvas (image) {
+            if (c.width != image.width) {
+                c.width = image.width;
+            }
+            if (c.height != image.height) {
+                c.height = image.height;
+            }
+        }
+
+        function drawRect(e) {
+            if (dragging) {
+                var coords = getEventCoords(e);
+                var ctx = c.getContext("2d");
+                ctx.clearRect(0, 0, c.width, c.height);
+                ctx.strokeStyle="#FFFFFF";
+                ctx.strokeRect(startX, startY, coords.x - startX, coords.y - startY);
+            }
+        }
+
+        function startDrag(e) {
+            var coords = getEventCoords(e);
+            var ctx = c.getContext("2d");
+            ctx.clearRect(0, 0, c.width, c.height);
+            startX = coords.x;
+            startY = coords.y;
+            dragging = true;
+        }
+
+        function stopDrag(e) {
+            dragging = false;
+            var coords = getEventCoords(e);
+            var upperleftX = Math.min(coords.x, startX);
+            var upperleftY = Math.min(coords.y, startY);
+            var width = Math.abs(coords.x - startX);
+            var height = Math.abs(coords.y - startY);
+            var cmd = 'R ' + upperleftX + ' ' + upperleftY + ' ' + width + ' ' + height;
+            sendCommand(cmd);
+        }
+        //
+        // rectangle drag on transparent canvas
+        //
+
+        var socket = null;
+
+        function sendCommand (cmd)
+        {
+            socket.emit('command', cmd);
+        }
 
         var SocketDataScanState = {
             WAITING_FOR_NEXT_ITEM : 0,
@@ -86,15 +212,12 @@
 
             console.log('starting...');
 
-            //var slider = document.getElementById("B");
-            //slider.oninput = function() {
-            //     sendCommand(this.id + ' ' + this.value);
-            //}
-
             socket = io();
 
             socket.on('connect', function(){
                 console.log('user connected');
+                sendCommand('H 1');
+                sendCommand('F 1');
             });
             socket.on('disconnect', function(){
                 console.log('user disconnected');
