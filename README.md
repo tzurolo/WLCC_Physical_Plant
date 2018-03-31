@@ -10,5 +10,5 @@ The oil tank camera system watches the oil level gauge on the top of the tank.
 ## System Details
 
 Each camera box has a Raspberry Pi B+ running Debian Jessie.
-A C++ program is launched by the node.js server.
-The C++ program uses the RaspiCam library to capture camera images and OpenCV to analyze the images. 
+A C++ program is launched by the `node.js` server.
+The C++ program uses the **RaspiCam** library to capture camera images and **OpenCV** to analyze the images. 
