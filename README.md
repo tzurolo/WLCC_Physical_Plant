@@ -4,7 +4,7 @@ This system monitors the boiler and oil tank using computer vision. Status of th
 
 ![Oil Tank Gauge](doc/gaugeValidRead.png)
 
-![Boiler Pressure Gauge](doc/pressureGauge.png)
+![Boiler Pressure Gauge](doc/pressureGauge2X.png)
 
 The system consists of two camera boxes: one for the boiler, one for the oil tank.
 The boiler camera system watches the pressure gauge and the boiler control panel.
