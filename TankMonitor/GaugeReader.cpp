@@ -25,6 +25,8 @@ protocols:
 #include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
+#include <cstdlib>
+#include <algorithm>
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
@@ -35,8 +37,88 @@ protocols:
 #include <netdb.h> 
 #include <opencv2/opencv.hpp>
 #include <raspicam/raspicam_cv.h>
+#include "json.hpp"
 extern "C" {
 #include <b64/cencode.h>
+}
+
+using json = nlohmann::json;
+
+namespace {
+
+struct CameraSettings {
+    double frameWidth;          // CV_CAP_PROP_FRAME_WIDTH
+    double frameHeight;         // CV_CAP_PROP_FRAME_HEIGHT
+    double format;              // CV_CAP_PROP_FORMAT: CV_8UC1 or CV_8UC3
+    double brightness;          // CV_CAP_PROP_BRIGHTNESS: [0,100]
+    double contrast;            // CV_CAP_PROP_CONTRAST: [0,100]
+    double saturation;          // CV_CAP_PROP_SATURATION: [0,100]
+    double gain;                // CV_CAP_PROP_GAIN: (iso): [0,100]
+    double exposure;            // CV_CAP_PROP_EXPOSURE: -1 auto. [1,100] shutter speed from 0 to 33ms
+    double whiteBalanceRedV;    // CV_CAP_PROP_WHITE_BALANCE_RED_V : [1,100] -1 auto whitebalance
+    double whiteBalanceBlueU;   // CV_CAP_PROP_WHITE_BALANCE_BLUE_U : [1,100] -1 auto whitebalance
+    double fps;                 // CV_CAP_PROP_FPS
+    CameraSettings () :
+        frameWidth(320),
+        frameHeight(480),
+        format(CV_8UC3),
+        brightness(80),
+        contrast(100),
+        saturation(50),
+        gain(50),
+        exposure(-1),
+        whiteBalanceRedV(-1),
+        whiteBalanceBlueU(-1),
+        fps(10)
+        {}
+    CameraSettings (
+        const json &j) :
+        frameWidth(j["frameWidth"]),
+        frameHeight(j["frameHeight"]),
+        format(j["format"]),
+        brightness(j["brightness"]),
+        contrast(j["contrast"]),
+        saturation(j["saturation"]),
+        gain(j["gain"]),
+        exposure(j["exposure"]),
+        whiteBalanceRedV(j["whiteBalanceRedV"]),
+        whiteBalanceBlueU(j["whiteBalanceBlueU"]),
+        fps(j["fps"])
+        {}
+    json toJson() const
+    {
+        json j = {
+            {"frameWidth", frameWidth},
+            {"frameHeight", frameHeight},
+            {"format", format},
+            {"brightness", brightness},
+            {"contrast", contrast},
+            {"saturation", saturation},
+            {"gain", gain},
+            {"exposure", exposure},
+            {"whiteBalanceRedV", whiteBalanceRedV},
+            {"whiteBalanceBlueU", whiteBalanceBlueU},
+            {"fps", fps}
+        };
+        return j;
+    }
+};
+
+json cvScalarToJson (
+    const cv::Scalar s)
+{
+    json j = {s[0], s[1], s[2]};
+    return j;
+}
+cv::Scalar cvScalarFromJson (
+    const json &j)
+{
+    cv::Scalar s;
+
+    for (int i = 0; i < 3; ++i)
+        s[i] = j[i];
+
+    return s;
 }
 
 struct ImageThresholds {
@@ -46,22 +128,140 @@ struct ImageThresholds {
         lower(255, 255, 255),
         upper(0, 0, 0)
         {}
+    ImageThresholds(
+        const json &j) :
+        lower(cvScalarFromJson(j["lower"])),
+        upper(cvScalarFromJson(j["upper"]))
+        {}
+    bool isValid () const
+        { return (lower[0] <= upper[0]) && (lower[1] <= upper[1]) && (lower[2] <= upper[2]); }
+    json toJson() const
+    {
+        json j = { {"lower", cvScalarToJson(lower)},
+                   {"upper", cvScalarToJson(upper)} };
+        return j;
+    }
 };
-ImageThresholds floatThresholds;
 
-typedef std::map<std::string, cv::Scalar> ThresholdData;
-static ThresholdData thresholdData;
-static char b64code[500000];
-static bool fullFrame = false;
-static bool genHistogram = false;
-static cv::Rect histogramRoi(0, 0, 0, 0);
+struct ObjectDetectionParameters {
+    // color thresholds of the desired object
+    ImageThresholds imageThresholds;
+    // of the contours returned by thresholding, the contour that has a
+    // bounding box with approximate size (width and height) will be selected
+    int expectedContourBboxWidth;
+    int expectedContourBboxHeight;
+    ObjectDetectionParameters () :
+        imageThresholds(),
+        expectedContourBboxWidth(0),
+        expectedContourBboxHeight(0)
+        {}
+    ObjectDetectionParameters (
+        const json &j) :
+        imageThresholds(j["thresholds"]),
+        expectedContourBboxWidth(j["expectedBboxWidth"]),
+        expectedContourBboxHeight(j["expectedBboxHeight"])
+        {}
+    bool isValid () const
+        { return imageThresholds.isValid() &&
+                 (expectedContourBboxWidth > 0) &&
+                 (expectedContourBboxHeight > 0);
+        }
+    json toJson() const
+    {
+        json j = { {"thresholds", imageThresholds.toJson()},
+                   {"expectedBboxWidth", expectedContourBboxWidth},
+                   {"expectedBboxHeight", expectedContourBboxHeight}
+                 };
+        return j;
+    }
+};
 
-namespace {
+struct Parameters {
+    CameraSettings camSettings;
+    ObjectDetectionParameters floatParameters;
+    ObjectDetectionParameters baseParameters;
+    int scaleBaseDy;
+    int scaleHeight;
+    Parameters() :
+        camSettings(),
+        floatParameters(),
+        baseParameters(),
+        scaleBaseDy(0),
+        scaleHeight(0)
+        {}
+    Parameters (
+        const json &j) :
+        camSettings(j["camSettings"]),
+        floatParameters(j["floatParameters"]),
+        baseParameters(j["baseParameters"]),
+        scaleBaseDy(j["scaleBaseDy"]),
+        scaleHeight(j["scaleHeight"])
+        {}
+    json toJson () const
+    {
+        json j = {
+            {"version", "V1.0"},
+            {"camSettings", camSettings.toJson()},
+            {"floatParameters", floatParameters.toJson()},
+            {"baseParameters", baseParameters.toJson()},
+            {"scaleBaseDy", scaleBaseDy},
+            {"scaleHeight", scaleHeight}
+        };
+        return j;
+    }
+};
+Parameters params;
+
+// computed values
+cv::Rect floatBBox;
+cv::Rect baseBBox;
+int gaugeLevelPct = 0;
+cv::Rect viewport;
+
+char b64code[500000];
+bool fullFrame = false;
+bool genHistogram = false;
+cv::Rect histogramRoi(0, 0, 0, 0);
+ObjectDetectionParameters trainingParameters;
+
+int cannyThreshold = 90;
+int numFrames = 0;
+int numDetections = 0;
+
+std::string commandLine;
 
     bool isValidRoi (
         const cv::Rect &roi) {
-        return ((roi.width > 7) && (roi.height > 7));
+        return ((roi.width > 5) && (roi.height > 5));
     }
+
+    bool rectIsInsideRect (
+        const cv::Rect &candidate,
+        const cv::Rect &containingRect)
+    {
+        const int candidateLeft = candidate.tl().x;
+        const int candidateRight = candidate.br().x;
+        const int candidateTop = candidate.tl().y;
+        const int candidateBottom = candidate.br().y;
+        const int containingRectLeft = containingRect.tl().x;
+        const int containingRectRight = containingRect.br().x;
+        const int containingRectTop = containingRect.tl().y;
+        const int containingRectBottom = containingRect.br().y;
+        return (candidateLeft > containingRectLeft) &&
+               (candidateRight < containingRectRight) &&
+               (candidateTop > containingRectTop) &&
+               (candidateBottom < containingRectBottom);
+    }
+
+    bool rectIsInsideImage (
+        const cv::Rect &candidate,
+        const cv::Mat &containingImage)
+    {
+		cv::Rect imageRect(0, 0, containingImage.cols, containingImage.rows);
+		return rectIsInsideRect(candidate, imageRect);
+	}
+	
+	
 void getCurrentTimeStrings (
     std::string &forImageAnnotation,    // 2015-12-27 01:54:18.86 (somewhat human-readable)
     std::string &forFilespec,           // 20151227T01541886 (like iso but without the punctuation)
@@ -181,19 +381,132 @@ void updateThresholdsWithHist (
     }
 }
 
+void findImageContoursByThresholds (
+    const cv::Mat &image,
+    const cv::Point &contourOffset,
+    const ImageThresholds &thresholds,
+    std::vector<std::vector<cv::Point> > &contours)
+{
+    // get a mask based on the thresholds
+    cv::Mat contourMask;
+    cv::inRange(image, thresholds.lower, thresholds.upper, contourMask);
+
+    // morphologically "close" the image (dilate then erode)
+    const int elementSizeForClose = 3;
+    cv::Mat elementForClose = cv::getStructuringElement( cv::MORPH_ELLIPSE,
+                    cv::Size( 2*elementSizeForClose + 1, 2*elementSizeForClose+1 ),
+                    cv::Point( elementSizeForClose, elementSizeForClose ) );
+    cv::dilate(contourMask, contourMask, elementForClose );
+    cv::erode(contourMask, contourMask, elementForClose );
+
+    // get the contours of the mask
+    cv::findContours(contourMask, contours,
+        cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE, contourOffset );
+}
+
+void findContourBoundingBox(
+    const cv::Mat &image,
+    const cv::Rect &roi,
+    const ObjectDetectionParameters &parameters,
+    cv::Rect &contourBoundingBox)
+{
+    contourBoundingBox.x = 0;
+    contourBoundingBox.y = 0;
+    contourBoundingBox.width = 0;
+    contourBoundingBox.height = 0;
+
+    const cv::Mat imageRoi =
+		(isValidRoi(roi) && rectIsInsideImage(roi, image))
+		? cv::Mat(image, roi)
+		: image;
+    if (parameters.isValid()) {
+        std::vector<std::vector<cv::Point> > contours;
+        findImageContoursByThresholds(imageRoi, roi.tl(), parameters.imageThresholds, contours);
+        // pick the contour with bbox near the expected size
+        int expectedWidth = ((roi.width > 0) && (roi.width < parameters.expectedContourBboxWidth))
+            ? roi.width
+            : parameters.expectedContourBboxWidth;
+        int expectedHeight = ((roi.height > 0) && (roi.height < parameters.expectedContourBboxHeight))
+            ? roi.height
+            : parameters.expectedContourBboxHeight;
+        const double sizeTolerance = 0.33;
+        const int widthTolerance = cvRound(expectedWidth * sizeTolerance);
+        const int heightTolerance = cvRound(expectedHeight * sizeTolerance);
+        for (int c = 0; c < contours.size(); ++c) {
+            const cv::Rect contourRec(cv::boundingRect(contours[c]));
+            if ((abs(contourRec.width - expectedWidth) <= widthTolerance) &&
+                (abs(contourRec.height - expectedHeight) <= heightTolerance)) {
+                contourBoundingBox = contourRec;
+                break;
+            }
+        }
+    }
+}
+
+bool contourMatchesParameters(
+    const int widthTolerance,
+    const int heightTolerance,
+    const cv::Rect &contourBoundingBox,
+    const ObjectDetectionParameters &parameters)
+{
+    return //parameters.isValid() &&
+        (parameters.expectedContourBboxWidth > 0) &&
+        (parameters.expectedContourBboxHeight > 0) &&
+        (abs(contourBoundingBox.width - parameters.expectedContourBboxWidth) <= widthTolerance) &&
+        (abs(contourBoundingBox.height - parameters.expectedContourBboxHeight) <= heightTolerance);
+}
+
+void updateBoundingBox (
+    const int deadband,
+    const cv::Rect &newBBox,
+    cv::Rect &updatedBBox)
+{
+    if (newBBox.width != 0) {
+        // we have a valid new box
+        if (updatedBBox.width == 0) {
+            // first time through - no exsiting bbox - take new one
+            updatedBBox = newBBox;
+        } else {
+            // latch biggest width and height
+            if (newBBox.width > updatedBBox.width) {
+                updatedBBox.width = newBBox.width;
+            }
+            if (newBBox.height > updatedBBox.height) {
+                updatedBBox.height = newBBox.height;
+            }
+
+            // hysteresis for position
+            if (newBBox.x > (updatedBBox.x + (deadband / 2))) {
+                updatedBBox.x = newBBox.x - (deadband / 2);
+            } else if (newBBox.x < (updatedBBox.x - (deadband / 2))) {
+                updatedBBox.x = newBBox.x + (deadband / 2);
+            }
+            if (newBBox.y > (updatedBBox.y + (deadband / 2))) {
+                updatedBBox.y = newBBox.y - (deadband / 2);
+            } else if (newBBox.y < (updatedBBox.y - (deadband / 2))) {
+                updatedBBox.y = newBBox.y + (deadband / 2);
+            }
+        }
+    } else {
+        updatedBBox = cv::Rect();
+        // std::cout << "no new bbox" << std::endl;
+    }
+}
+
 void showHistogram (
     const std::string &imageID,
     const int sockfd,
-    cv::Mat &image)
+    ObjectDetectionParameters &parameters,
+    cv::Mat &histogramSourceImage,
+    cv::Mat &cameraImage)
 {
-    bool haveValidRoi = isValidRoi(histogramRoi);
+    const bool haveValidRoi = isValidRoi(histogramRoi);
     std::vector<cv::Mat> bgr_planes;
     if (haveValidRoi) {
-        cv::Mat srcImage = cv::Mat(image, histogramRoi);
+        cv::Mat srcImage = cv::Mat(histogramSourceImage, histogramRoi);
         cv::split( srcImage, bgr_planes );
-        //rectangle(image, histogramRoi, cv::Scalar(0, 255, 0));
     } else {
-        cv::split( image, bgr_planes );
+        cv::split( histogramSourceImage, bgr_planes );
     }
 
     /// Establish the number of bins
@@ -223,73 +536,70 @@ void showHistogram (
     cv::normalize(g_hist, g_hist, 0, histImage.rows, cv::NORM_MINMAX, -1, cv::Mat() );
     cv::normalize(r_hist, r_hist, 0, histImage.rows, cv::NORM_MINMAX, -1, cv::Mat() );
 
-    // update roi thresholds
-    const float histLevel = histImage.rows * 0.15;
-    if (haveValidRoi) {
-        updateThresholdsWithHist(b_hist, histSize, histLevel, 0, floatThresholds);
-        updateThresholdsWithHist(g_hist, histSize, histLevel, 1, floatThresholds);
-        updateThresholdsWithHist(r_hist, histSize, histLevel, 2, floatThresholds);
+    /// Draw for each channel
+    for (int i = 1; i < histSize; ++i) {
+        line( histImage, cv::Point( bin_w*(i-1), hist_h - cvRound(b_hist.at<float>(i-1)) ) ,
+                        cv::Point( bin_w*(i), hist_h - cvRound(b_hist.at<float>(i)) ),
+                        cv::Scalar( 255, 0, 0), 2, 8, 0  );
+        line( histImage, cv::Point( bin_w*(i-1), hist_h - cvRound(g_hist.at<float>(i-1)) ) ,
+                        cv::Point( bin_w*(i), hist_h - cvRound(g_hist.at<float>(i)) ),
+                        cv::Scalar( 0, 255, 0), 2, 8, 0  );
+        line( histImage, cv::Point( bin_w*(i-1), hist_h - cvRound(r_hist.at<float>(i-1)) ) ,
+                        cv::Point( bin_w*(i), hist_h - cvRound(r_hist.at<float>(i)) ),
+                        cv::Scalar( 0, 0, 255), 2, 8, 0  );
     }
 
-  /// Draw for each channel
-  for (int i = 1; i < histSize; ++i) {
-      line( histImage, cv::Point( bin_w*(i-1), hist_h - cvRound(b_hist.at<float>(i-1)) ) ,
-                       cv::Point( bin_w*(i), hist_h - cvRound(b_hist.at<float>(i)) ),
-                       cv::Scalar( 255, 0, 0), 2, 8, 0  );
-      line( histImage, cv::Point( bin_w*(i-1), hist_h - cvRound(g_hist.at<float>(i-1)) ) ,
-                       cv::Point( bin_w*(i), hist_h - cvRound(g_hist.at<float>(i)) ),
-                       cv::Scalar( 0, 255, 0), 2, 8, 0  );
-      line( histImage, cv::Point( bin_w*(i-1), hist_h - cvRound(r_hist.at<float>(i-1)) ) ,
-                       cv::Point( bin_w*(i), hist_h - cvRound(r_hist.at<float>(i)) ),
-                       cv::Scalar( 0, 0, 255), 2, 8, 0  );
-  }
     if (haveValidRoi) {
+        // update roi thresholds
+        const float histLevel = histImage.rows * 0.15;
+        if (haveValidRoi) {
+            updateThresholdsWithHist(b_hist, histSize, histLevel, 0, parameters.imageThresholds);
+            updateThresholdsWithHist(g_hist, histSize, histLevel, 1, parameters.imageThresholds);
+            updateThresholdsWithHist(r_hist, histSize, histLevel, 2, parameters.imageThresholds);
+        }
+
         const int lineY = hist_h - cvRound(histLevel);
-        line(histImage, cv::Point(bin_w * floatThresholds.lower[0], lineY),
-                        cv::Point(bin_w * floatThresholds.upper[0], lineY),
+        line(histImage, cv::Point(bin_w * parameters.imageThresholds.lower[0], lineY),
+                        cv::Point(bin_w * parameters.imageThresholds.upper[0], lineY),
                         cv::Scalar( 255, 0, 0), 2, 8, 0  );
-        line(histImage, cv::Point(bin_w * floatThresholds.lower[1], lineY + 4),
-                        cv::Point(bin_w * floatThresholds.upper[1], lineY + 4),
+        line(histImage, cv::Point(bin_w * parameters.imageThresholds.lower[1], lineY + 4),
+                        cv::Point(bin_w * parameters.imageThresholds.upper[1], lineY + 4),
                         cv::Scalar( 0, 255, 0), 2, 8, 0  );
-        line(histImage, cv::Point(bin_w * floatThresholds.lower[2], lineY + 8),
-                        cv::Point(bin_w * floatThresholds.upper[2], lineY + 8),
+        line(histImage, cv::Point(bin_w * parameters.imageThresholds.lower[2], lineY + 8),
+                        cv::Point(bin_w * parameters.imageThresholds.upper[2], lineY + 8),
                         cv::Scalar( 0, 0, 255), 2, 8, 0  );
 
-        // get a mask based on the thresholds
-        cv::Mat contourMask;
-        cv::inRange(image, floatThresholds.lower, floatThresholds.upper, contourMask);
-
-        // morphologically "close" the image (dilate then erode)
-        const int elementSizeForClose = 3;
-        cv::Mat elementForClose = cv::getStructuringElement( cv::MORPH_ELLIPSE,
-                       cv::Size( 2*elementSizeForClose + 1, 2*elementSizeForClose+1 ),
-                       cv::Point( elementSizeForClose, elementSizeForClose ) );
-        cv::dilate(contourMask, contourMask, elementForClose );
-        cv::erode(contourMask, contourMask, elementForClose );
-
-        // get the contours of the mask
         std::vector<std::vector<cv::Point> > contours;
-        // Find contours
-        cv::findContours(contourMask, contours,
-            cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE, cv::Point(0, 0) );
+        findImageContoursByThresholds(histogramSourceImage, cv::Point(0, 0),
+            parameters.imageThresholds, contours);
         if (!contours.empty()) {
             // find the contour with biggest bbox
-            double maxContourArea = 0;
+            int maxContourArea = 0;
+            cv::Rect largestContourBbox;
             int largestContourIndex = -1;
             for (int c = 0; c < contours.size(); ++c) {
-              const double contourArea = cv::contourArea(contours[c]);
-              if (contourArea > maxContourArea) {
-	        largestContourIndex = c;
-	        maxContourArea = contourArea;
-              }
+                const cv::Rect contourBBox = cv::boundingRect(contours[c]);
+                const int contourArea = contourBBox.area();
+                if (contourArea > maxContourArea) {
+                    largestContourIndex = c;
+                    largestContourBbox = contourBBox;
+                    maxContourArea = contourArea;
+                }
             }
             if (largestContourIndex >= 0) {
-                cv::drawContours(image, contours, largestContourIndex, cv::Scalar(255, 0, 0), 2);
-                cv::Rect boundingRect = cv::boundingRect(contours[largestContourIndex]);
+                // update contour bounding box parameters
+                if (largestContourBbox.width > parameters.expectedContourBboxWidth) {
+                    parameters.expectedContourBboxWidth = largestContourBbox.width;
+                }
+                if (largestContourBbox.height > parameters.expectedContourBboxHeight) {
+                    parameters.expectedContourBboxHeight = largestContourBbox.height;
+                }
 
+                // draw largest contour on image
+                cv::drawContours(cameraImage, contours, largestContourIndex, cv::Scalar(255, 0, 0), 2);
                 char msg[100];
                 sprintf(msg, "top: %d, width: %d, num contours: %d",
-                    boundingRect.y, boundingRect.width, contours.size());
+                    largestContourBbox.y, largestContourBbox.width, contours.size());
                 std::cout << msg << std::endl;
             }
         }
@@ -298,19 +608,44 @@ void showHistogram (
   sendImageToHost(std::string(), imageID, sockfd, histImage);
 }
 
+void drawBracket (
+    const int x,
+    const int y,
+    const int height,
+    const int width,
+    cv::Mat &frame)
+{
+    const cv::Scalar color(0, 255, 255);
+    const int lineWidth = 2;
+    cv::line(frame, cv::Point(x, y),
+                    cv::Point(x + width, y),
+                    color, lineWidth);
+    cv::line(frame, cv::Point(x, y),
+                    cv::Point(x, y + height),
+                    color, lineWidth);
+    cv::line(frame, cv::Point(x, y + height),
+                    cv::Point(x + width, y + height),
+                    color, lineWidth);
+}
+
+void drawFloatIndicator (
+    const cv::Rect &floatBBox,
+    const ObjectDetectionParameters &floatParameters,
+    cv::Mat &frame)
+{
+    const int width = 5;
+    drawBracket(floatBBox.x - floatParameters.expectedContourBboxWidth / 2,
+        floatBBox.y, floatParameters.expectedContourBboxHeight, width, frame);
+    drawBracket(floatBBox.x + floatParameters.expectedContourBboxWidth +
+        floatParameters.expectedContourBboxWidth / 2,
+        floatBBox.y, floatParameters.expectedContourBboxHeight, -width, frame);
+}
+
 void readCamImage (
     raspicam::RaspiCam_Cv &cam,
 //    cv::VideoCapture &cap,
     int sockfd)
 {
-    //std::cerr << "read cam image" << std::endl;
-
-    cv::Mat edges;
-    cv::Mat tedges;
-    cv::Mat ycrcb;
-    cv::Mat floatMask;
-    cv::Mat baseMask;
-
     // get image from camera
     cv::Mat frame;
 #if 1
@@ -329,135 +664,264 @@ void readCamImage (
     std::string forFilespec;
     std::string forServerDatabase;
     getCurrentTimeStrings(forImageAnnotation, forFilespec, forServerDatabase);
-#if 0
-    // analyze image to find and read gauge
-    // find float and base
-    cv::cvtColor(frame, ycrcb, CV_BGR2YCrCb);
-    cv::GaussianBlur(ycrcb, ycrcb, cv::Size(7,7), 1.5, 1.5);
-    cv::inRange(ycrcb, thresholdData["floatMin"], thresholdData["floatMax"], floatMask);
 
-    // get the contours of the float mask
-    std::vector<std::vector<cv::Point> > contours;
-    /// Find contours
-    cv::findContours(floatMask, contours,
-        cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE, cv::Point(0, 0) );
-    std::cerr << contours.size() << " float contours found." << std::endl;
+    cv::Mat histogramSourceImage;
 #if 0
-    // pick the contour with biggest bbox
-    double floatMaxBboxSize = 0;
-    cv::Rect floatBbox;
-    for (int c = 0; c < contours.size(); ++c) {
-      cv::Rect contourRec(boundingRect(contours[c]));
-      const double bboxSize = contourRec.area();
-      if (bboxSize > floatMaxBboxSize) {
-	floatBbox = contourRec;
-	floatMaxBboxSize = bboxSize;
-      }
-    }
+    histogramSourceImage = frame;
 #else
-    // pick the contour with lowest top coord, but more
-    // than minimum size
-    const double minFloatContourArea = 12.0;
-    const int maxFloatBboxHeight = 15;
-    int minTop = 1000;
-    cv::Rect floatBbox;
-    for (int c = 0; c < contours.size(); ++c) {
-      cv::Rect contourRec(boundingRect(contours[c]));
-      int contourRecTop = contourRec.y;
-      if ((contourArea(contours[c]) > minFloatContourArea) &&
-          (contourRecTop < minTop)) {
-	floatBbox = contourRec;
-	minTop = contourRecTop;
-      }
-    }
-    if (floatBbox.height > maxFloatBboxHeight) {
-        floatBbox.height = maxFloatBboxHeight;
-    }
-#endif
-#if 0
-    // find bounding box around all the float contours
-    std::vector<cv::Point> bboxPts;
-    for (int c = 0; c < contours.size(); ++c) {
-      cv::Rect contourRec(boundingRect(contours[c]));
-      bboxPts.push_back(contourRec.tl());
-      bboxPts.push_back(contourRec.br());
-    }
-    cv::Rect floatBbox(boundingRect(bboxPts));
+    cv::cvtColor(frame, histogramSourceImage, cv::COLOR_BGR2HSV);
 #endif
 
-    // find the base
-    cv::inRange(ycrcb, thresholdData["baseMin"], thresholdData["baseMax"], baseMask);
-    cv::findContours(baseMask, contours,
-        cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE, cv::Point(0,0));
-    std::cerr << contours.size() << " base contours found." << std::endl;
-    // pick the contour with biggest bbox
-    double maxBboxSize = 0;
-    cv::Rect baseBbox;
-    for (int c = 0; c < contours.size(); ++c) {
-      cv::Rect contourRec(boundingRect(contours[c]));
-      const double bboxSize = contourRec.area();
-      if (bboxSize > maxBboxSize) {
-	baseBbox = contourRec;
-	maxBboxSize = bboxSize;
-      }
-    }
+    bool haveValidLevelPct = false;
 
-    // find the scale
-    // find float and base
-    cv::Mat scaleMask;
-    cv::inRange(ycrcb, thresholdData["scaleMin"], thresholdData["scaleMax"], scaleMask);
-    // get the contours of the scale mask
-    /// Find contours
-    cv::findContours(scaleMask, contours,
-        cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE, cv::Point(0, 0) );
-    // pick the contour with lowest top coord, but more
-    // than minimum size
-    const double minScaleContourArea = 40.0;
-    minTop = 1000;
-    cv::Rect scaleBbox;
-    for (int c = 0; c < contours.size(); ++c) {
-      cv::Rect contourRec(boundingRect(contours[c]));
-      int contourRecTop = contourRec.y;
-      if ((contourArea(contours[c]) > minScaleContourArea) &&
-          (contourRecTop < minTop)) {
-	scaleBbox = contourRec;
-	minTop = contourRecTop;
-      }
-    }
-    cv::Rect caseBbox(floatBbox.x - 20, scaleBbox.y,
-        50, baseBbox.y - scaleBbox.y);
+    // histograms
+    //showHistogram("histogram", sockfd, trainingParameters, histogramSourceImage, frame);
+    const bool haveValidRoi = isValidRoi(histogramRoi);
 
-    const int level = caseBbox.br().y - floatBbox.y;
-    tankLevel = (level * 100) / caseBbox.height;
+    ++numFrames;
+    cv::Mat edgeImage;
+    cv::cvtColor(frame, edgeImage, cv::COLOR_BGR2GRAY);
+    GaussianBlur(edgeImage, edgeImage, cv::Size(3,3), 2, 2);
+    cv::Canny(edgeImage, edgeImage, cannyThreshold, cannyThreshold*3, 3);
 
-    // annotate and write image
-    cv::rectangle(frame, floatBbox, cv::Scalar(0, 255, 0), 2);
-    cv::rectangle(frame, caseBbox, cv::Scalar(255, 255, 255), 1);
-#endif
-    cv::Mat dst;
-    if (fullFrame) {
-        dst = frame;
-    } else {
-        cv::Rect roi(80, 135, 115, 250);
-        dst = cv::Mat(frame, roi);
-    }
-#if 0
-    cv::Mat cvImage;
-    cv::cvtColor(dst, cvImage, cv::COLOR_BGR2GRAY);
-#endif
-#if 0
-    GaussianBlur(cvImage, cvImage, cv::Size(3,3), 2, 2);
-#endif
-#if 0
-    // canny edge detection
-    cv::Canny(cvImage, dst, 75, 200, 3);
-#endif
+    // close the edge image
+    const int elementSize = 4;
+    cv::Mat elementForClose = cv::getStructuringElement(cv::MORPH_RECT,
+                cv::Size(elementSize, elementSize),
+                cv::Point(1, 1));
+    cv::dilate(edgeImage, edgeImage, elementForClose );
+    cv::erode(edgeImage, edgeImage, elementForClose );
 
     if (genHistogram) {
-        // histograms
-        showHistogram("histogram", sockfd, dst);
+        // create overlay of the closed edge image onto the camera image
+        cv::Mat edgeImageBGR;
+        cv::cvtColor(edgeImage, edgeImageBGR, cv::COLOR_GRAY2BGR);
+        cv::bitwise_or(edgeImageBGR, frame, frame);
     }
+
+    // NOTE: get the histogram of the level 2 contour inside the selected ROI.
+    // get the polygon for the level 2 contour and fill it to make a mask
+    // for calcHist, but we must remove the area from any nested contours
+
+    bool detectedFloat = false;
+    bool detectedBase = false;
+
+    // get the level two contours
+    std::vector<std::vector<cv::Point> > contours;
+    std::vector<cv::Vec4i> hierarchy;
+    cv::findContours(edgeImage, contours, hierarchy,
+        cv::RETR_TREE, cv::CHAIN_APPROX_TC89_L1);
+    if (!contours.empty()) {
+        // find the contour with biggest bbox
+        int maxContourArea = 0;
+        cv::Rect selectedContourBbox;
+        int selectedContourIndex = -1;
+        const int widthTolerance = 5;
+        const int heightTolerance = 8;
+        for (int c = 0; c < contours.size(); ++c) {
+            const int parent = hierarchy[c][3];
+            if ((parent >= 0) && (hierarchy[parent][3] < 0)) {
+                // level 2 contour
+                if (genHistogram) {
+                    cv::drawContours(frame, contours, c, cv::Scalar(255, 0, 255), 1);
+                }
+                const cv::Rect contourBBox = cv::boundingRect(contours[c]);
+                if (contourMatchesParameters(3, 5, contourBBox, params.floatParameters)) {
+                    updateBoundingBox(4, contourBBox, floatBBox);
+                    detectedFloat = true;
+                } else if (contourMatchesParameters(1, 1, contourBBox, params.baseParameters)) {
+                    updateBoundingBox(2, contourBBox, baseBBox);
+                    detectedBase = true;
+                }
+#if 1
+                if (haveValidRoi) {
+                    // detect contour that is inside ROI
+                    if (rectIsInsideRect(contourBBox, histogramRoi)) {
+                        selectedContourIndex = c;
+                        selectedContourBbox = contourBBox;
+                    }
+                }
+#else
+                if ((contourBBox.width >= 15) && (contourBBox.width <= 42) &&
+                    (abs(contourBBox.height - 30) <= heightTolerance)) {
+                    const int contourArea = contourBBox.area();
+                    if (contourArea > maxContourArea) {
+                        largestContourIndex = c;
+                        largestContourBbox = contourBBox;
+                        maxContourArea = contourArea;
+                    }
+                }
+#endif
+            }
+        }
+#if 1
+        if (selectedContourIndex >= 0) {
+            // update contour bounding box parameters
+            if (selectedContourBbox.width > trainingParameters.expectedContourBboxWidth) {
+                trainingParameters.expectedContourBboxWidth = selectedContourBbox.width;
+            }
+            if (selectedContourBbox.height > trainingParameters.expectedContourBboxHeight) {
+                trainingParameters.expectedContourBboxHeight = selectedContourBbox.height;
+            }
+            ++numDetections;
+            // draw selected contour on image
+            cv::drawContours(frame, contours, selectedContourIndex, cv::Scalar(255, 0, 0), 1);
+            char msg[200];
+            sprintf(msg, "top: %d, w: %d, h: %d, #contours: %d, detection: %d%%",
+                selectedContourBbox.y, selectedContourBbox.width, selectedContourBbox.height, contours.size(),
+                (numDetections * 100) / numFrames);
+            std::cout << msg << std::endl;
+        } else {
+            // overlay edge image if we did not detect
+            //cv::bitwise_or(edgeImageBGR, frame, frame);
+        }
+#endif
+        if ((floatBBox.width > 0) && (baseBBox.width > 0) &&    // detected float and base
+            (floatBBox.br().y < baseBBox.y) &&  // float is above base
+            (abs((baseBBox.x + baseBBox.width / 2) - (floatBBox.x + floatBBox.width / 2)) <= 4)) { // float is roughly centered over base
+            // we have a valid reading
+            // estimate oil level
+            int gaugeDy = baseBBox.y - floatBBox.y;
+            if ((params.scaleBaseDy > 0) && (params.scaleHeight> 0)) {
+                gaugeLevelPct = ((gaugeDy - params.scaleBaseDy) * 100) / params.scaleHeight;
+                haveValidLevelPct = true;
+
+                // update viewport
+                cv::Rect newViewport(
+                    floatBBox.x - (floatBBox.width + (floatBBox.width / 2)),
+                    baseBBox.y - (params.scaleBaseDy + (params.scaleHeight / 2) + params.scaleHeight),
+                    floatBBox.width * 4,
+                    params.scaleHeight * 2);
+                updateBoundingBox(20, newViewport, viewport);
+            } else {
+                std::cout << "---> gauge level: " << gaugeDy << " pixels" << std::endl;
+            }
+        }
+    }
+    //cv::bitwise_or(frame, edgeImage, frame);
+
+    if (genHistogram && (viewport.width > 0)) {
+        cv::rectangle(frame, viewport, cv::Scalar(255, 255, 255), 1);
+    }
+
+    if (haveValidLevelPct) {
+        if (floatBBox.width > 0) {
+            drawFloatIndicator(floatBBox, params.floatParameters, frame);
+        }
+        if (baseBBox.width > 0) {
+            cv::rectangle(frame, baseBBox, cv::Scalar(0, 0, 255), 2);
+            if (genHistogram && (params.scaleBaseDy > 0) && (params.scaleHeight> 0)) {
+                // show scale empty and full levels
+                const int scaleX1 = baseBBox.x;
+                const int scaleX2 = baseBBox.x + baseBBox.width;
+                const int scaleEmptyY = baseBBox.y - params.scaleBaseDy;
+                const int scaleFullY = baseBBox.y - (params.scaleBaseDy + params.scaleHeight);
+                cv::line(frame, cv::Point(scaleX1, scaleEmptyY),
+                                cv::Point(scaleX2, scaleEmptyY),
+                                cv::Scalar(255, 0, 0), 2);
+                cv::line(frame, cv::Point(scaleX1, scaleFullY),
+                                cv::Point(scaleX2, scaleFullY),
+                                cv::Scalar(255, 0, 0), 2);
+            }
+        }
+    }
+    cv::Mat dst;
+    if (isValidRoi(viewport) && rectIsInsideImage(viewport, frame) && !fullFrame) {
+        //cv::Rect roi(80, 135, 115, 250);
+        dst = cv::Mat(frame, viewport);
+    } else {
+        dst = frame;
+    }
+#if 1
+    if (haveValidLevelPct) {
+        char buf[50];
+        sprintf(buf, "%d%% %c%c", gaugeLevelPct,
+            detectedBase ? '^' : '_',
+            detectedFloat ? '^' : '_');
+        cv::putText(dst, buf, cv::Point(10, dst.size().height - 30), 
+            cv::FONT_HERSHEY_PLAIN, 1.0, cv::Scalar(255, 255, 0));
+    }
+#endif
     sendImageToHost(forImageAnnotation, "tankGaugeImage", sockfd, dst);
+}
+
+void executeCommand (
+    const std::string &command,
+    const std::string &settingsFilename,
+    bool &running,
+    raspicam::RaspiCam_Cv &cam)
+{
+    const std::string cmdArgs = (command.length() > 2) ? command.substr(2) : std::string();
+    switch (command[0]) {
+        case 'A' :  // accept training parameters
+            switch (cmdArgs[0]) {
+                case 'F' :
+                    params.floatParameters = trainingParameters;
+                    std::cout << "float parameters accepted" << std::endl;
+                    break;
+                case 'B' :
+                    params.baseParameters = trainingParameters;
+                    std::cout << "base parameters accepted" << std::endl;
+                    break;
+                case 'S' :
+                    if (isValidRoi(histogramRoi) && (baseBBox.width > 0)) {
+                        params.scaleBaseDy = baseBBox.y - (histogramRoi.y + histogramRoi.height);
+                        params.scaleHeight = histogramRoi.height;
+                        std::cout << "scale bounds accepted: base Dy=" << params.scaleBaseDy <<
+                            ", height=" << params.scaleHeight << std::endl;
+                    }
+                    break;
+                default:
+                    break;
+            }
+            break;
+        case 'C' : {    // camera setting
+            const char* camArgs = (cmdArgs.length() > 2)
+                ? cmdArgs.substr(2).c_str()
+                : nullptr;
+            switch (cmdArgs[0]) {
+                case 'B' : cam.set( CV_CAP_PROP_BRIGHTNESS, atoi(camArgs)); break;
+                case 'C' : cam.set( CV_CAP_PROP_CONTRAST, atoi(camArgs)); break;
+                case 'G' : cam.set( CV_CAP_PROP_GAIN, atoi(camArgs)); break;
+                case 'E' : cam.set( CV_CAP_PROP_EXPOSURE, atoi(camArgs)); break;
+                case 'S' : 
+                    cannyThreshold = atoi(camArgs);
+                    // cam.set( CV_CAP_PROP_SATURATION, atoi(camArgs));
+                    break;
+                default: break;
+            }
+            }
+            break;
+        case 'F' : fullFrame = (atoi(cmdArgs.c_str()) == 1);  break;
+        case 'H' : genHistogram = (atoi(cmdArgs.c_str()) == 1);  break;
+        case 'R' :    
+            // set histogram rectangle
+            sscanf(cmdArgs.c_str(), "%d %d %d %d",
+                    &histogramRoi.x,
+                    &histogramRoi.y,
+                    &histogramRoi.width,
+                    &histogramRoi.height);
+            trainingParameters = ObjectDetectionParameters();
+            break;
+        case 'S' : {
+            const json j = params.toJson();
+            std::ofstream os1(settingsFilename);
+            os1 << std::setw(4) << j << std::endl;
+            }
+            break;
+        case 'X' :
+            running = false;
+            break;
+        case 'Z' :
+            params = Parameters();
+            floatBBox = cv::Rect();
+            baseBBox = cv::Rect();
+            gaugeLevelPct = 0;
+            viewport = cv::Rect();
+            break;
+        default:
+            break;
+    }
 }
 
 }   // namespace
@@ -470,38 +934,23 @@ int main (const int argc, const char* argv[])
     // child process when that limit is reached.
     //static char buf[50000]; /* buf must survive until stdout is closed */
     //setvbuf ( stdout , buf , _IOFBF , sizeof(buf) );
+    std::cout << "C++ version: " << __cplusplus << std::endl;
+    const std::string settingsFilename = std::string(argv[0]) + "Settings.json";
+    std::cout << "reading settings from " << settingsFilename << std::endl;
+    json j;
+    std::ifstream is1(settingsFilename);
+    is1 >> j;
+    params = Parameters(j);
 #if 1
     raspicam::RaspiCam_Cv Camera;
-    const double width = Camera.get( CV_CAP_PROP_FRAME_WIDTH);
-    const double height = Camera.get( CV_CAP_PROP_FRAME_HEIGHT);
-    const double brightness = Camera.get( CV_CAP_PROP_BRIGHTNESS);
-    const double constrast = Camera.get( CV_CAP_PROP_CONTRAST);
-    const double gain = Camera.get( CV_CAP_PROP_GAIN);
-    const double saturation = Camera.get( CV_CAP_PROP_SATURATION);
-    const double exposure = Camera.get( CV_CAP_PROP_EXPOSURE);
-    const double wb_red_v = Camera.get( CV_CAP_PROP_WHITE_BALANCE_RED_V);
-    const double wb_blue_u = Camera.get( CV_CAP_PROP_WHITE_BALANCE_BLUE_U);
-    const double mode = Camera.get( CV_CAP_PROP_MODE);
-    std::cout << "width: " << width << std::endl;
-    std::cout << "height: " << height << std::endl;
-    std::cout << "brightness: " << brightness << std::endl;
-    std::cout << "constrast: " << constrast << std::endl;
-    std::cout << "gain: " << gain << std::endl;
-    std::cout << "saturation: " << saturation << std::endl;
-    std::cout << "exposure: " << exposure << std::endl;
-    std::cout << "wb_red_v: " << wb_red_v << std::endl;
-    std::cout << "wb_blue_u: " << wb_blue_u << std::endl;
-    std::cout << "mode: " << mode << std::endl;
-
-    Camera.set( CV_CAP_PROP_FORMAT, CV_8UC3 );
-    Camera.set( CV_CAP_PROP_FRAME_WIDTH, 320);
-    Camera.set( CV_CAP_PROP_FRAME_HEIGHT, 480);
-    Camera.set( CV_CAP_PROP_BRIGHTNESS, 80);
-    Camera.set( CV_CAP_PROP_CONTRAST, 100);
-    Camera.set( CV_CAP_PROP_SATURATION, 65);
-    //Camera.set( CV_CAP_PROP_GAIN, 85);
-    //Camera.set( CV_CAP_PROP_EXPOSURE, 85);
-    //Camera.set( CV_CAP_PROP_MODE, 2);
+    Camera.set( CV_CAP_PROP_FORMAT, params.camSettings.format);
+    Camera.set( CV_CAP_PROP_FRAME_WIDTH, params.camSettings.frameWidth);
+    Camera.set( CV_CAP_PROP_FRAME_HEIGHT, params.camSettings.frameHeight);
+    Camera.set( CV_CAP_PROP_BRIGHTNESS, params.camSettings.brightness);
+    Camera.set( CV_CAP_PROP_CONTRAST, params.camSettings.contrast);
+    Camera.set( CV_CAP_PROP_SATURATION, params.camSettings.saturation);
+    Camera.set( CV_CAP_PROP_GAIN, params.camSettings.gain);
+    Camera.set( CV_CAP_PROP_EXPOSURE, params.camSettings.exposure);
     if (!Camera.open()) {std::cerr<<"Error opening the camera"<<std::endl;return -1;}
 
 #else
@@ -583,9 +1032,8 @@ int main (const int argc, const char* argv[])
 */
     // read color threshold data
 
-    std::string cinStr;
-    do {
-#if 1
+    bool running = true;
+    while (running) {
         FD_ZERO(&readfds);
         FD_SET(sockfd, &readfds);
         tv.tv_sec = 0;
@@ -603,48 +1051,71 @@ int main (const int argc, const char* argv[])
             } else {
                 // got data
                 const std::string dataStr(&readBuf[0], readCount);
-                //std::cout << "got command: '" << dataStr << "'" << std::endl;
-                const std::string cmdArg = dataStr.substr(2);
-                const int cmdArgVal = atoi(cmdArg.c_str());
-                switch (dataStr[0]) {
-                    case 'B' : Camera.set( CV_CAP_PROP_BRIGHTNESS, cmdArgVal); break;
-                    case 'C' : Camera.set( CV_CAP_PROP_CONTRAST, cmdArgVal); break;
-                    case 'G' : Camera.set( CV_CAP_PROP_GAIN, cmdArgVal); break;
-                    case 'E' : Camera.set( CV_CAP_PROP_EXPOSURE, cmdArgVal); break;
-                    case 'S' : Camera.set( CV_CAP_PROP_SATURATION, cmdArgVal); break;
-                    case 'H' : genHistogram = (cmdArgVal == 1);  break;
-                    case 'F' : fullFrame = (cmdArgVal == 1);  break;
-                    case 'R' : {    // get histogram rectangle
-                        sscanf(cmdArg.c_str(), "%d %d %d %d",
-                                &histogramRoi.x,
-                                &histogramRoi.y,
-                                &histogramRoi.width,
-                                &histogramRoi.height);
-                               }
-                        floatThresholds = ImageThresholds();
-
-                               break;
-                    default:    break;
+                for (int c = 0; c < readCount; ++c) {
+                    const char ch = dataStr[c];
+                    switch (ch) {
+                        case '\r' :
+                            // we have a complete command
+                            executeCommand(commandLine, settingsFilename, running, Camera);
+                            commandLine.clear();
+                            break;
+                        case '\n' :
+                            // ignore newlines
+                            break;
+                        default:
+                            commandLine += ch;
+                            break;
+                    }
                 }
             }
         } else {
             // time to read and process a frame
             readCamImage(Camera, sockfd);
         }
-
-#endif
-#if 0
-        std::cerr << "waiting for cmd" << std::endl;
-        std::getline(std::cin, cinStr);
-
-        if (cinStr == "readCam") {
-#endif
-
-#if 0
-            std::cout << serverJSON << std::endl;
-        }
-#endif
-    } while (cinStr != "exit");
+    }
     std::cout << "exiting" << std::endl;
     return 0;
 }
+
+#if 0
+    // analyze image to find and read gauge
+    // find float
+    cv::Rect newFloatBBox;
+    findContourBoundingBox(histogramSourceImage, cv::Rect(), params.floatParameters, newFloatBBox);
+    updateBoundingBox(4, newFloatBBox, floatBBox);
+    cv::Rect baseROI;
+    if (floatBBox.width > 0) {
+        // valid float bounding box
+        // find base
+        const int baseROIy = floatBBox.y + floatBBox.height;
+        const cv::Rect newBaseROI(floatBBox.x, baseROIy,
+                         floatBBox.width, frame.size().height - baseROIy);
+        cv::Rect newBaseBBox;
+        findContourBoundingBox(histogramSourceImage, newBaseROI, params.baseParameters, newBaseBBox);
+        updateBoundingBox(8, newBaseBBox, baseBBox);
+        baseROI = newBaseROI;
+    } else {
+        baseBBox = cv::Rect();
+    }
+
+    bool haveValidLevelPct = false;
+    if ((floatBBox.width > 0) && (baseBBox.width > 0)) {
+        // we have a valid reading
+        // estimate oil level
+        int gaugeDy = baseBBox.y - floatBBox.y;
+        if ((params.scaleBaseDy > 0) && (params.scaleHeight> 0)) {
+            gaugeLevelPct = ((gaugeDy - params.scaleBaseDy) * 100) / params.scaleHeight;
+            haveValidLevelPct = true;
+
+            // update viewport
+            cv::Rect newViewport(
+                floatBBox.x - (floatBBox.width * 2),
+                baseBBox.y - (params.scaleBaseDy + (params.scaleHeight / 2) + params.scaleHeight),
+                floatBBox.width * 5,
+                params.scaleHeight * 2);
+            updateBoundingBox(20, newViewport, viewport);
+        } else {
+            std::cout << "---> gauge level: " << gaugeDy << " pixels" << std::endl;
+        }
+    }
+#endif
