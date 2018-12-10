@@ -2,7 +2,7 @@
 
 protocols:
     images:
-        <identifier:imagedata>
+        <i:identifier:imagedata.>
         identifier is the IMG element ID
 
     JSON:
@@ -275,7 +275,7 @@ void readCamImage (
     const int b64Len2 = base64_encode_blockend(&b64code[b64Len], &b64State);
     //std::cerr << "len1: " << b64Len << ", len2: " << b64Len2 << std::endl;
 
-    serverImage = std::string("<" + roiSpec.name + ":data:image/jpeg;base64,");
+    serverImage = std::string("<i:" + roiSpec.name + ":data:image/jpeg;base64,");
 #if 0
     serverImage += "iVBORw0KGgoAA"
         "AANSUhEUgAAABAAAAAQAQMAAAAlPW0iAAAABlBMVEUAAAD///+l2Z/dAAAAM0l"
@@ -290,7 +290,7 @@ void readCamImage (
             serverImage += ch;
         }
     }
-    serverImage += '>';
+    serverImage += ".>";
 #endif
 
 #else
