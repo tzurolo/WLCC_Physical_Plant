@@ -2,11 +2,11 @@
 
 protocols:
     images:
-        <identifier:imagedata>
+        <i:identifier:base64imagedata.>
         identifier is the IMG element ID
 
     JSON:
-        { ... }
+        <j:length:JSONdata>
 
     TODO:
     1. change this over to use a socket to transmit data to node.js server (especially
@@ -335,7 +335,7 @@ void sendImageToHost (
     const int encodedLen = (b64Len1 + b64Len2);
     std::string imageStr;
     imageStr.reserve(encodedLen);
-    imageStr = std::string("<") + imageID + ":data:image/jpeg;base64,";
+    imageStr = std::string("<i:") + imageID + ":data:image/jpeg;base64,";
     // the encoder puts in cr/lf every 72 chars
     for (int i = 0; i < encodedLen; ++i) {
         const char ch = b64code[i];
@@ -343,7 +343,7 @@ void sendImageToHost (
             imageStr += ch;
         }
     }
-    imageStr += '>';
+    imageStr += ".>";
 
     const int n = write(sockfd, imageStr.c_str(), imageStr.size());
     if (n < 0) {
