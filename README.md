@@ -1,6 +1,6 @@
 # WLCC Physical Plant
 
-This system monitors the boiler and oil tank using **computer vision**. Status of the system is displayed on a web page, and alerts can be generated based on various conditions (oil low, pressure too high, etc.)
+This system monitors the Windsor Locks Congregational Church boiler and oil tank using **computer vision**. Status of the system is displayed on a web page, and alerts can be generated based on various conditions (oil low, pressure too high, etc.)
 
 ![Oil Tank Gauge](doc/gaugeValidRead.png)
 ![Boiler Pressure Gauge](doc/pressureGauge2X.png)
